@@ -39,6 +39,7 @@ class RealisticFuturesStrategy(bt.Strategy):
         ("debug", False),
         ("dynamic_trail_steps", []),
         ("logger", None),
+        ("initial_cash", 0.0),
     )
 
     def get_backtest_dynamic_slippage(self, size: int) -> float:
@@ -77,7 +78,7 @@ class RealisticFuturesStrategy(bt.Strategy):
         self.pending_exit_phase = None
 
         # Virtual accounting.
-        self.virtual_cash = 0.0
+        self.virtual_cash = float(self.params.initial_cash)
         self.virtual_position_size = 0
         self.virtual_entry_price = None
         self.virtual_entry_commission = 0.0
@@ -113,6 +114,7 @@ class RealisticFuturesStrategy(bt.Strategy):
             precision_num=self.params.precision_num,
             dynamic_trail_steps=self.params.dynamic_trail_steps,
             execution_model="VIRTUAL",
+            initial_cash=self.virtual_cash,
         )
 
     def _get_commission_per_side(self) -> float:

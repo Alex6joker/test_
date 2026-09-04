@@ -91,7 +91,8 @@ def run_instrument_backtest(instrument_folder, cfg):
             safety_factor=cfg.SAFETY_FACTOR,
             precision_num=cfg.PRECISION_NUM,
             dynamic_trail_steps=cfg.DYNAMIC_TRAIL_STEPS,
-            logger=logger
+            logger=logger,
+            initial_cash=cfg.INITIAL_CASH
         )
         
         cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name='trades')

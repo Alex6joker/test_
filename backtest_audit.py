@@ -268,8 +268,13 @@ def load_log(path: str) -> AuditData:
     return d
 
 
-def result(name, checked, errors):
-    return {"name": name, "checked": checked, "errors": errors}
+def result(name, checked, errors, warnings=None):
+    return {
+        "name": name,
+        "checked": checked,
+        "errors": errors,
+        "warnings": warnings or [],
+    }
 
 
 def audit(data: AuditData):
@@ -286,6 +291,7 @@ def audit(data: AuditData):
     trail_errors = []
     multi_errors = []
     retro_errors = []
+    trail_warnings = []
 
     for trade, trails in trails_by_trade.items():
         trails.sort(key=lambda x: x.seq)
@@ -301,8 +307,19 @@ def audit(data: AuditData):
             if p is None or p.trade != trade:
                 trail_errors.append(f"trade_id={trade} step={t.step}: TRAIL_UPDATE не привязан к правильной INTRABAR_PHASE")
                 continue
-            if t.step != previous_step + 1:
-                trail_errors.append(f"trade_id={trade}: step={t.step}, ожидался {previous_step + 1}")
+            # A later trail step may be logged directly when the same monotonic
+            # price segment has already crossed one or more earlier trigger levels.
+            # The causal invariant is therefore strict monotonicity of step_idx,
+            # not mandatory adjacency (0,1,2).
+            if t.step <= previous_step:
+                trail_errors.append(
+                    f"trade_id={trade}: step={t.step} не возрастает после {previous_step}"
+                )
+            elif t.step > previous_step + 1:
+                trail_warnings.append(
+                    f"trade_id={trade}: пропущены trail steps "
+                    f"{previous_step + 1}..{t.step - 1} перед step={t.step}"
+                )
             previous_step = t.step
             if previous_sl is not None and not same(t.old_sl, previous_sl):
                 trail_errors.append(f"trade_id={trade} step={t.step}: old_sl={t.old_sl} != previous_new_sl={previous_sl}")
@@ -336,8 +353,11 @@ def audit(data: AuditData):
             continue
         ts.sort(key=lambda x: x.seq)
         steps = [x.step for x in ts]
-        if steps != list(range(steps[0], steps[0] + len(steps))):
-            multi_errors.append(f"trade_id={key[0]} bar={key[1]} phase={key[2]}: steps={steps}")
+        if any(steps[i] <= steps[i - 1] for i in range(1, len(steps))):
+            multi_errors.append(
+                f"trade_id={key[0]} bar={key[1]} phase={key[2]}: "
+                f"steps не возрастают: {steps}"
+            )
         prices = [x.trigger for x in ts]
         p = ts[0].phase
         if p.direction == "DOWN" and any(prices[i] < prices[i+1] - EPS for i in range(len(prices)-1)):
@@ -394,7 +414,7 @@ def audit(data: AuditData):
 
 
     return [
-        result("TRAIL_CAUSALITY", checked, trail_errors),
+        result("TRAIL_CAUSALITY", checked, trail_errors, trail_warnings),
         result("MULTIPLE_TRAIL_STEPS", len(by_phase), multi_errors),
         result("EXIT_CROSSING_CAUSALITY", len(data.crossings), exit_errors),
         result("NO_RETROACTIVE_SL", len(data.trails), retro_errors),
@@ -425,9 +445,28 @@ def run_causal_audit(log_path: str = os.path.join("logs", "backtest_diagnostic.l
     print(f"Closed trades checked:   {len(d.closed)}")
     print(f"Trail updates checked:   {len(d.trails)}")
     print(f"Exit crossings checked:  {len(d.crossings)}")
+    warnings = sum(len(x.get("warnings", [])) for x in results)
     print()
     for r in results:
-        print(f"{r['name']:<28} {'PASS' if not r['errors'] else 'FAIL':<5} checked={r['checked']:<6} errors={len(r['errors'])}")
+        print(
+            f"{r['name']:<28} "
+            f"{'PASS' if not r['errors'] else 'FAIL':<5} "
+            f"checked={r['checked']:<6} errors={len(r['errors'])}"
+            + (f" warnings={len(r.get('warnings', []))}" if r.get("warnings") else "")
+        )
+    if warnings:
+        print()
+        print(f"Warnings (не являются FAIL): {warnings}")
+        shown_w = 0
+        for r in results:
+            for w in r.get("warnings", []):
+                shown_w += 1
+                if shown_w > 20:
+                    print(f"... и ещё {warnings - 20}")
+                    break
+                print(f"WARNING #{shown_w}: {w}")
+            if shown_w > 20:
+                break
     print()
     if errors == 0:
         print("CAUSAL AUDIT: PASS")

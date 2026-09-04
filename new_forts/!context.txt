@@ -1,0 +1,9 @@
+Скачивать сторого "склеенные" непрерывные данные о фьючерсе.
+
+Серебро полные котировки с https://www.finam.ru/quote/forts/silv/
+
+Газ полные котировки с https://www.finam.ru/quote/forts/ng/
+
+Нефть полные котировки с https://www.finam.ru/quote/forts/br/
+
+Сбер полные котировки с https://www.finam.ru/quote/forts/sbrf/

@@ -7,6 +7,7 @@ import uuid
 import backtrader as bt
 import pandas as pd
 
+from core.backtest_data import export_backtrader_adapter, load_and_prepare_backtest_dataframe
 from core.backtest_engine import RealisticFuturesStrategy
 from core.backtest_logger import BacktestLogger
 
@@ -134,64 +135,12 @@ def run_instrument_backtest(instrument_folder, cfg):
         return
 
     try:
-        raw_df = pd.read_csv(csv_path, sep=";", dtype=str)
-        raw_df.columns = [str(c).upper() for c in raw_df.columns]
-
-        def find_column(*tokens):
-            for column in raw_df.columns:
-                if any(token in column for token in tokens):
-                    return column
-            return None
-
-        open_col = find_column("OPEN", "ОТКР")
-        high_col = find_column("HIGH", "МАКС")
-        low_col = find_column("LOW", "МИН")
-        close_col = find_column("CLOSE", "ЗАКР")
-        vol_col = find_column("VOL", "ОБЪЕМ")
-        date_col = find_column("DATE", "ДАТА")
-        time_col = find_column("TIME", "ВРЕМЯ")
-
-        if not all(
-            [open_col, high_col, low_col, close_col, vol_col, date_col, time_col]
-        ):
-            raise ValueError(
-                "CSV structure error: unable to identify all date/time/OHLCV columns"
-            )
-
-        raw_df["DATETIME"] = pd.to_datetime(
-            raw_df[date_col].astype(str).str.strip()
-            + " "
-            + raw_df[time_col].astype(str).str.strip(),
-            errors="coerce",
-            dayfirst=False,
-        )
-
-        prepared = pd.DataFrame(
-            {
-                "DATETIME": raw_df["DATETIME"],
-                "OPEN": pd.to_numeric(raw_df[open_col], errors="coerce"),
-                "HIGH": pd.to_numeric(raw_df[high_col], errors="coerce"),
-                "LOW": pd.to_numeric(raw_df[low_col], errors="coerce"),
-                "CLOSE": pd.to_numeric(raw_df[close_col], errors="coerce"),
-                "VOLUME": pd.to_numeric(raw_df[vol_col], errors="coerce"),
-            }
-        )
-
+        prepared = load_and_prepare_backtest_dataframe(csv_path)
         _validate_input_dataframe(prepared, logger)
 
         # This is only a temporary adapter for Backtrader. The source CSV is
         # never sorted, filled, or otherwise modified.
-        export_df = pd.DataFrame(
-            {
-                "DateTime": prepared["DATETIME"].dt.strftime("%Y%m%d %H%M%S"),
-                "Open": prepared["OPEN"],
-                "High": prepared["HIGH"],
-                "Low": prepared["LOW"],
-                "Close": prepared["CLOSE"],
-                "Volume": prepared["VOLUME"].round().astype(int),
-            }
-        )
-        export_df.to_csv(processed_path, index=False)
+        export_backtrader_adapter(prepared, processed_path)
 
         cerebro = bt.Cerebro()
 

@@ -1,27 +1,120 @@
-import os
-import sys
-import uuid
-import pandas as pd
-import backtrader as bt
+from __future__ import annotations
 
-# Подключаем ядро стратегий из core
-from core.backtest_engine import RealisticFuturesStrategy, ContractVolumeAnalyzer
+import math
+import os
+import uuid
+
+import backtrader as bt
+import pandas as pd
+
+from core.backtest_engine import RealisticFuturesStrategy
 from core.backtest_logger import BacktestLogger
 
+
+def _validate_input_dataframe(df: pd.DataFrame, logger: BacktestLogger) -> None:
+    """Validate input without sorting, filling, dropping, or rewriting rows."""
+    required = {"DATETIME", "OPEN", "HIGH", "LOW", "CLOSE", "VOLUME"}
+    missing = required.difference(df.columns)
+    if missing:
+        raise ValueError(f"CSV validation failed: missing columns = {sorted(missing)}")
+
+    if df.empty:
+        raise ValueError("CSV validation failed: dataset is empty")
+
+    dt = pd.to_datetime(df["DATETIME"], errors="coerce")
+    if dt.isna().any():
+        bad_rows = (dt.isna()).to_numpy().nonzero()[0][:10].tolist()
+        raise ValueError(
+            f"CSV validation failed: invalid timestamps at rows = {bad_rows}"
+        )
+
+    if not dt.is_monotonic_increasing:
+        raise ValueError("CSV validation failed: timestamps are not ordered increasingly")
+
+    if dt.duplicated().any():
+        duplicate_rows = dt[dt.duplicated()].index[:10].tolist()
+        raise ValueError(
+            f"CSV validation failed: duplicate timestamps at rows = {duplicate_rows}"
+        )
+
+    numeric_columns = ["OPEN", "HIGH", "LOW", "CLOSE", "VOLUME"]
+    for column in numeric_columns:
+        values = pd.to_numeric(df[column], errors="coerce")
+        if values.isna().any():
+            bad_rows = values.isna().to_numpy().nonzero()[0][:10].tolist()
+            raise ValueError(
+                f"CSV validation failed: invalid {column} at rows = {bad_rows}"
+            )
+        if not values.map(math.isfinite).all():
+            raise ValueError(f"CSV validation failed: non-finite values in {column}")
+
+    opens = pd.to_numeric(df["OPEN"], errors="coerce")
+    highs = pd.to_numeric(df["HIGH"], errors="coerce")
+    lows = pd.to_numeric(df["LOW"], errors="coerce")
+    closes = pd.to_numeric(df["CLOSE"], errors="coerce")
+    volumes = pd.to_numeric(df["VOLUME"], errors="coerce")
+
+    if (highs < pd.concat([opens, closes], axis=1).max(axis=1)).any():
+        raise ValueError("CSV validation failed: HIGH is below OPEN/CLOSE")
+    if (lows > pd.concat([opens, closes], axis=1).min(axis=1)).any():
+        raise ValueError("CSV validation failed: LOW is above OPEN/CLOSE")
+    if (highs < lows).any():
+        raise ValueError("CSV validation failed: HIGH is below LOW")
+    if (volumes < 0).any():
+        raise ValueError("CSV validation failed: negative VOLUME")
+
+    gap_mask = dt.diff() > pd.Timedelta(minutes=1)
+    gap_count = int(gap_mask.sum())
+    gap_examples = [
+        {
+            "previous_datetime": dt.iloc[i - 1],
+            "datetime": dt.iloc[i],
+            "gap_minutes": (dt.iloc[i] - dt.iloc[i - 1]).total_seconds() / 60.0,
+        }
+        for i in range(1, len(dt))
+        if gap_mask.iloc[i]
+    ][:10]
+
+    logger.event(
+        "CSV_VALIDATION",
+        rows=len(df),
+        first_datetime=dt.iloc[0],
+        last_datetime=dt.iloc[-1],
+        duplicate_timestamps=0,
+        timestamp_order="INCREASING",
+        gaps_gt_1_minute=gap_count,
+        gap_examples=gap_examples,
+        data_mutation="NONE",
+        previous_available_row_rule=True,
+        passed=True,
+    )
+
+
 def run_instrument_backtest(instrument_folder, cfg):
-    """
-    Запускает бэктест для конкретного инструмента.
-    instrument_folder — имя папки (например, '01_SILVER')
-    cfg — динамически подгруженный модуль config.py
-    """
-    # Динамически строим путь к исходному файлу данных внутри папки инструмента
-    csv_path = os.path.join(instrument_folder, cfg.TEST_OPTIMIZE_CSV_PATH_4MONTH_PATH)
+    """Run the virtual futures backtest for one instrument."""
+    csv_path = os.path.join(
+        instrument_folder,
+        cfg.TEST_OPTIMIZE_CSV_PATH_4MONTH_PATH,
+    )
+
     unique_id = uuid.uuid4().hex[:8]
     processed_path = f"temp_bt_ready_{unique_id}.csv"
+
+    precision_money = getattr(
+        cfg,
+        "PRECISION_NUM_DEPO_RUB",
+        cfg.PRECISION_NUM,
+    )
+
     logger = BacktestLogger(
-        os.path.join(os.path.dirname(__file__), "logs", "backtest_diagnostic.log"),
+        os.path.join(
+            os.path.dirname(__file__),
+            "logs",
+            "backtest_diagnostic.log",
+        ),
         reset=True,
     )
+
     logger.section(f"BACKTEST START: {cfg.FUT_SEC_CODE}")
     logger.event(
         "INPUT",
@@ -32,54 +125,76 @@ def run_instrument_backtest(instrument_folder, cfg):
         take_profit=cfg.TAKE_PROFIT,
         stop_loss=cfg.STOP_LOSS,
         offer_risk=cfg.OFFER_RISK,
+        precision_money=precision_money,
     )
 
     if not os.path.exists(csv_path):
         logger.error(f"DATA_FILE_NOT_FOUND csv_path = {csv_path}")
         logger.close()
         return
-        
+
     try:
-        # Подготовка датасета (приведение колонок к стандарту)
-        raw_df = pd.read_csv(csv_path, sep=';', dtype=str)
-        # Приводим названия колонок самого DataFrame к верхнему регистру
+        raw_df = pd.read_csv(csv_path, sep=";", dtype=str)
         raw_df.columns = [str(c).upper() for c in raw_df.columns]
-        
-        try:
-            open_col_list = [c for c in raw_df.columns if 'OPEN' in c or 'ОТКР' in c]
-            high_col_list = [c for c in raw_df.columns if 'HIGH' in c or 'МАКС' in c]
-            if not open_col_list or not high_col_list:
-                raise IndexError
-            open_col = open_col_list[0]
-            high_col = high_col_list[0]
-            low_col = [c for c in raw_df.columns if 'LOW' in c or 'МИН' in c][0]
-            close_col = [c for c in raw_df.columns if 'CLOSE' in c or 'ЗАКР' in c][0]
-            vol_col = [c for c in raw_df.columns if 'VOL' in c or 'ОБЪЕМ' in c][0]
-            date_col = [c for c in raw_df.columns if 'DATE' in c or 'ДАТА' in c][0]
-            time_col = [c for c in raw_df.columns if 'TIME' in c or 'ВРЕМЯ' in c][0]
-        except IndexError:
-            logger.error(f"CSV_STRUCTURE_ERROR columns = {list(raw_df.columns)}")
-            return
-        
-        raw_df['TIMESTRING'] = (
-            raw_df[date_col].astype(str).str.replace('-', '', regex=False).str.replace('.', '', regex=False) + ' ' + 
-            raw_df[time_col].astype(str).str.replace(':', '', regex=False).str.zfill(6)
+
+        def find_column(*tokens):
+            for column in raw_df.columns:
+                if any(token in column for token in tokens):
+                    return column
+            return None
+
+        open_col = find_column("OPEN", "ОТКР")
+        high_col = find_column("HIGH", "МАКС")
+        low_col = find_column("LOW", "МИН")
+        close_col = find_column("CLOSE", "ЗАКР")
+        vol_col = find_column("VOL", "ОБЪЕМ")
+        date_col = find_column("DATE", "ДАТА")
+        time_col = find_column("TIME", "ВРЕМЯ")
+
+        if not all(
+            [open_col, high_col, low_col, close_col, vol_col, date_col, time_col]
+        ):
+            raise ValueError(
+                "CSV structure error: unable to identify all date/time/OHLCV columns"
+            )
+
+        raw_df["DATETIME"] = pd.to_datetime(
+            raw_df[date_col].astype(str).str.strip()
+            + " "
+            + raw_df[time_col].astype(str).str.strip(),
+            errors="coerce",
+            dayfirst=False,
         )
-        
-        ready_df = pd.DataFrame()
-        ready_df['DateTime'] = raw_df['TIMESTRING']
-        ready_df['Open'] = raw_df[open_col].astype(float)
-        ready_df['High'] = raw_df[high_col].astype(float)
-        ready_df['Low'] = raw_df[low_col].astype(float)
-        ready_df['Close'] = raw_df[close_col].astype(float)
-        ready_df['Volume'] = raw_df[vol_col].astype(float).round().astype(int)
-        
-        ready_df.to_csv(processed_path, index=False)
-        
-        # Настройка Cerebro
+
+        prepared = pd.DataFrame(
+            {
+                "DATETIME": raw_df["DATETIME"],
+                "OPEN": pd.to_numeric(raw_df[open_col], errors="coerce"),
+                "HIGH": pd.to_numeric(raw_df[high_col], errors="coerce"),
+                "LOW": pd.to_numeric(raw_df[low_col], errors="coerce"),
+                "CLOSE": pd.to_numeric(raw_df[close_col], errors="coerce"),
+                "VOLUME": pd.to_numeric(raw_df[vol_col], errors="coerce"),
+            }
+        )
+
+        _validate_input_dataframe(prepared, logger)
+
+        # This is only a temporary adapter for Backtrader. The source CSV is
+        # never sorted, filled, or otherwise modified.
+        export_df = pd.DataFrame(
+            {
+                "DateTime": prepared["DATETIME"].dt.strftime("%Y%m%d %H%M%S"),
+                "Open": prepared["OPEN"],
+                "High": prepared["HIGH"],
+                "Low": prepared["LOW"],
+                "Close": prepared["CLOSE"],
+                "Volume": prepared["VOLUME"].round().astype(int),
+            }
+        )
+        export_df.to_csv(processed_path, index=False)
+
         cerebro = bt.Cerebro()
-        
-        # Передаем параметры динамического конфига напрямую в универсальную стратегию
+
         cerebro.addstrategy(
             RealisticFuturesStrategy,
             trigger=cfg.TRIGGER_SPREAD,
@@ -90,50 +205,68 @@ def run_instrument_backtest(instrument_folder, cfg):
             real_margin=cfg.REAL_MARGIN,
             safety_factor=cfg.SAFETY_FACTOR,
             precision_num=cfg.PRECISION_NUM,
+            precision_money=precision_money,
             dynamic_trail_steps=cfg.DYNAMIC_TRAIL_STEPS,
             logger=logger,
-            initial_cash=cfg.INITIAL_CASH
+            initial_cash=cfg.INITIAL_CASH,
         )
-        
-        cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name='trades')
-        cerebro.addanalyzer(ContractVolumeAnalyzer, _name='volume_tracker')
-        cerebro.addanalyzer(bt.analyzers.drawdown.DrawDown, _name='drawdown_tracker')
-        
+
         data = bt.feeds.GenericCSVData(
-            dataname=processed_path, sep=',', dtformat='%Y%m%d %H%M%S',
-            timeframe=bt.TimeFrame.Minutes, datetime=0, time=-1,
-            open=1, high=2, low=3, close=4, volume=5, openinterest=-1, header=0
+            dataname=processed_path,
+            sep=",",
+            dtformat="%Y%m%d %H%M%S",
+            timeframe=bt.TimeFrame.Minutes,
+            datetime=0,
+            time=-1,
+            open=1,
+            high=2,
+            low=3,
+            close=4,
+            volume=5,
+            openinterest=-1,
+            headers=True,
         )
         cerebro.adddata(data)
-        
-        cerebro.broker.setcash(cfg.INITIAL_CASH) 
+
+        # Backtrader's broker is deliberately not the source of fills/P&L.
+        # Its commission configuration exists only so the strategy can read
+        # the same per-side commission value.
+        cerebro.broker.setcash(cfg.INITIAL_CASH)
         cerebro.broker.setcommission(
             commission=cfg.REAL_COMMISSION / 2,
             margin=cfg.REAL_MARGIN,
             mult=cfg.REAL_MULT,
             stocklike=False,
-            commtype=bt.CommInfoBase.COMM_FIXED
+            commtype=bt.CommInfoBase.COMM_FIXED,
         )
-        
-        logger.event("BROKER_START", cash=cerebro.broker.getcash(), value=cerebro.broker.getvalue(), commission_per_side=cfg.REAL_COMMISSION / 2, margin=cfg.REAL_MARGIN, mult=cfg.REAL_MULT)
+
+        logger.event(
+            "BROKER_START",
+            cash=cerebro.broker.getcash(),
+            value=cerebro.broker.getvalue(),
+            commission_per_side=cfg.REAL_COMMISSION / 2,
+            margin=cfg.REAL_MARGIN,
+            mult=cfg.REAL_MULT,
+            source_of_truth="VIRTUAL_STRATEGY",
+        )
+
         strategies = cerebro.run()
         first_strat = strategies[0]
-        
-        # Сбор и вывод статистики
-        trade_info = first_strat.analyzers.trades.get_analysis()
-        total_closed_trades = 0
-        if 'total' in trade_info and 'closed' in trade_info['total']:
-            total_closed_trades = trade_info['total']['closed']
-            
-        # Strategy execution is virtual: Backtrader is used for the data/indicator engine,
-        # while fills and P&L are calculated by RealisticFuturesStrategy itself.
-        final_portfolio_value = float(first_strat.final_virtual_equity)
-        real_net_profit = final_portfolio_value - cfg.INITIAL_CASH
+
+        final_portfolio_value = round(
+            float(first_strat.final_virtual_equity),
+            precision_money,
+        )
+        real_net_profit = round(
+            final_portfolio_value - float(cfg.INITIAL_CASH),
+            precision_money,
+        )
+
         total_closed_trades = int(first_strat.closed_trades)
         total_contracts = int(first_strat.total_contracts)
         total_commission = round(
-            total_contracts * float(cfg.REAL_COMMISSION / 2),
-            cfg.PRECISION_NUM_DEPO_RUB if hasattr(cfg, 'PRECISION_NUM_DEPO_RUB') else 2,
+            float(first_strat.total_commission),
+            precision_money,
         )
 
         logger.event(
@@ -145,11 +278,19 @@ def run_instrument_backtest(instrument_folder, cfg):
             total_contracts=total_contracts,
             total_commission=total_commission,
             open_position_size=first_strat.virtual_position_size,
-            virtual_cash=first_strat.virtual_cash,
+            virtual_cash=round(
+                float(first_strat.virtual_cash),
+                precision_money,
+            ),
         )
-        
+
+    except Exception as exc:
+        logger.error(
+            f"BACKTEST_EXCEPTION type = {type(exc).__name__}; message = {exc}"
+        )
+        raise
     finally:
-        if os.path.exists(processed_path): 
+        if os.path.exists(processed_path):
             os.remove(processed_path)
         logger.section("BACKTEST END")
         logger.close()

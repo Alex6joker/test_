@@ -122,17 +122,18 @@ class BacktestExecutionMixin:
                         self.tp_level + slippage
                     )
 
-            self.logger.debug_event(
-                "EXIT_CROSSING",
-                trade_id=self.trade_id,
-                bar_index=bar_index,
-                phase_index=phase_index,
-                event_type=event_type,
-                crossing_price=current_price,
-                sl_level=self.sl_level,
-                tp_level=self.tp_level,
-                slippage=slippage,
-            )
+            if self.logger.wants_debug_event("EXIT_CROSSING"):
+                self.logger.debug_event(
+                    "EXIT_CROSSING",
+                    trade_id=self.trade_id,
+                    bar_index=bar_index,
+                    phase_index=phase_index,
+                    event_type=event_type,
+                    crossing_price=current_price,
+                    sl_level=self.sl_level,
+                    tp_level=self.tp_level,
+                    slippage=slippage,
+                )
 
             self._close_virtual_position(
                 reason=event_type,
@@ -166,21 +167,22 @@ class BacktestExecutionMixin:
             start_price = points[phase_index]
             end_price = points[phase_index + 1]
 
-            self.logger.debug_event(
-                "INTRABAR_PHASE",
-                trade_id=self.trade_id,
-                bar_index=bar_index,
-                phase_index=phase_index,
-                start_price=start_price,
-                end_price=end_price,
-                direction="UP" if end_price > start_price else (
-                    "DOWN" if end_price < start_price else "FLAT"
-                ),
-                entry_price=self.virtual_entry_price,
-                tp_level=self.tp_level,
-                sl_level=self.sl_level,
-                current_trail_step=self.current_trail_step,
-            )
+            if self.logger.wants_debug_event("INTRABAR_PHASE"):
+                self.logger.debug_event(
+                    "INTRABAR_PHASE",
+                    trade_id=self.trade_id,
+                    bar_index=bar_index,
+                    phase_index=phase_index,
+                    start_price=start_price,
+                    end_price=end_price,
+                    direction="UP" if end_price > start_price else (
+                        "DOWN" if end_price < start_price else "FLAT"
+                    ),
+                    entry_price=self.virtual_entry_price,
+                    tp_level=self.tp_level,
+                    sl_level=self.sl_level,
+                    current_trail_step=self.current_trail_step,
+                )
 
             closed = self._process_monotonic_segment(
                 start_price=start_price,
@@ -189,32 +191,34 @@ class BacktestExecutionMixin:
                 phase_index=phase_index,
             )
 
-            self.logger.debug_event(
-                "TRAIL_EVALUATION",
-                trade_id=self.trade_id,
-                bar_index=bar_index,
-                phase_index=phase_index,
-                position_size=self.virtual_position_size,
-                start_price=start_price,
-                end_price=end_price,
-                entry_price=self.virtual_entry_price,
-                tp_level=self.tp_level,
-                sl_level=self.sl_level,
-                current_trail_step=self.current_trail_step,
-            )
+            if self.logger.wants_debug_event("TRAIL_EVALUATION"):
+                self.logger.debug_event(
+                    "TRAIL_EVALUATION",
+                    trade_id=self.trade_id,
+                    bar_index=bar_index,
+                    phase_index=phase_index,
+                    position_size=self.virtual_position_size,
+                    start_price=start_price,
+                    end_price=end_price,
+                    entry_price=self.virtual_entry_price,
+                    tp_level=self.tp_level,
+                    sl_level=self.sl_level,
+                    current_trail_step=self.current_trail_step,
+                )
 
-            self.logger.debug_event(
-                "EXIT_EVALUATION",
-                trade_id=self.trade_id,
-                bar_index=bar_index,
-                phase_index=phase_index,
-                position_size=self.virtual_position_size,
-                start_price=start_price,
-                end_price=end_price,
-                tp_level=self.tp_level,
-                sl_level=self.sl_level,
-                closed=closed,
-            )
+            if self.logger.wants_debug_event("EXIT_EVALUATION"):
+                self.logger.debug_event(
+                    "EXIT_EVALUATION",
+                    trade_id=self.trade_id,
+                    bar_index=bar_index,
+                    phase_index=phase_index,
+                    position_size=self.virtual_position_size,
+                    start_price=start_price,
+                    end_price=end_price,
+                    tp_level=self.tp_level,
+                    sl_level=self.sl_level,
+                    closed=closed,
+                )
 
             if closed:
                 break

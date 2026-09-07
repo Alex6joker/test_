@@ -44,11 +44,12 @@ class BacktestTrailingMixin:
 
         self.sl_level = new_sl
         self.current_trail_step = step_idx
-        self.logger.trade(
-            f"TRAIL_UPDATE trade_id = {self.trade_id}; "
-            f"step_idx = {step_idx}; "
-            f"trigger_pct = {self.params.dynamic_trail_steps[step_idx][0]}; "
-            f"stop_pct = {self.params.dynamic_trail_steps[step_idx][1]}; "
-            f"old_sl_level = {old_sl}; new_sl_level = {new_sl}; "
-            f"trigger_cross_price = {current_price}"
-        )
+        if self.logger.wants_trade():
+            self.logger.trade(
+                f"TRAIL_UPDATE trade_id = {self.trade_id}; "
+                f"step_idx = {step_idx}; "
+                f"trigger_pct = {self.params.dynamic_trail_steps[step_idx][0]}; "
+                f"stop_pct = {self.params.dynamic_trail_steps[step_idx][1]}; "
+                f"old_sl_level = {old_sl}; new_sl_level = {new_sl}; "
+                f"trigger_cross_price = {current_price}"
+            )

@@ -24,18 +24,19 @@ class BacktestAccountingMixin:
     def _log_virtual_portfolio(self, bar_index: int):
         unrealized = self._unrealized_pnl()
         equity = self._money(self.virtual_cash + unrealized)
-        self.logger.debug_event(
-            "PORTFOLIO_STATE",
-            bar_index=bar_index,
-            datetime=self.data.datetime.datetime(0),
-            cash=self.virtual_cash,
-            unrealized_pnl=unrealized,
-            portfolio_value=equity,
-            position_size=self.virtual_position_size,
-            position_price=self.virtual_entry_price,
-            mark_price=float(self.data.close[0]),
-            trade_id=self.trade_id,
-        )
+        if self.logger.wants_debug_event("PORTFOLIO_STATE"):
+            self.logger.debug_event(
+                "PORTFOLIO_STATE",
+                bar_index=bar_index,
+                datetime=self.data.datetime.datetime(0),
+                cash=self.virtual_cash,
+                unrealized_pnl=unrealized,
+                portfolio_value=equity,
+                position_size=self.virtual_position_size,
+                position_price=self.virtual_entry_price,
+                mark_price=float(self.data.close[0]),
+                trade_id=self.trade_id,
+            )
 
     def _check_accounting(self):
         closed_net = self._money(
@@ -55,17 +56,18 @@ class BacktestAccountingMixin:
         )
         difference = self._money(actual_equity - expected_equity)
 
-        self.logger.event(
-            "ACCOUNTING_CHECK",
-            initial_cash=self._money(self.params.initial_cash),
-            closed_net_pnl=closed_net,
-            open_entry_commission=open_entry_commission,
-            unrealized_pnl=self._unrealized_pnl(),
-            expected_equity=expected_equity,
-            actual_equity=actual_equity,
-            difference=difference,
-            passed=(difference == 0.0),
-        )
+        if self.logger.wants_event("ACCOUNTING_CHECK"):
+            self.logger.event(
+                "ACCOUNTING_CHECK",
+                initial_cash=self._money(self.params.initial_cash),
+                closed_net_pnl=closed_net,
+                open_entry_commission=open_entry_commission,
+                unrealized_pnl=self._unrealized_pnl(),
+                expected_equity=expected_equity,
+                actual_equity=actual_equity,
+                difference=difference,
+                passed=(difference == 0.0),
+            )
 
         if difference != 0.0:
             raise RuntimeError(
@@ -119,14 +121,15 @@ class BacktestAccountingMixin:
                 errors.append("open trade record exists while position is flat")
 
         passed = not errors
-        self.logger.event(
-            "TRADE_LIFECYCLE_CHECK",
-            trade_count=len(self._trade_records),
-            closed_trade_count=self.closed_trades,
-            open_position_size=self.virtual_position_size,
-            errors=errors,
-            passed=passed,
-        )
+        if self.logger.wants_event("TRADE_LIFECYCLE_CHECK"):
+            self.logger.event(
+                "TRADE_LIFECYCLE_CHECK",
+                trade_count=len(self._trade_records),
+                closed_trade_count=self.closed_trades,
+                open_position_size=self.virtual_position_size,
+                errors=errors,
+                passed=passed,
+            )
 
         if errors:
             raise RuntimeError(
@@ -135,11 +138,12 @@ class BacktestAccountingMixin:
 
     def _check_negative_cash(self):
         passed = self.virtual_cash >= 0.0
-        self.logger.event(
-            "NEGATIVE_CASH_CHECK",
-            virtual_cash=self.virtual_cash,
-            passed=passed,
-        )
+        if self.logger.wants_event("NEGATIVE_CASH_CHECK"):
+            self.logger.event(
+                "NEGATIVE_CASH_CHECK",
+                virtual_cash=self.virtual_cash,
+                passed=passed,
+            )
         if not passed:
             raise RuntimeError(
                 f"Virtual cash became negative: {self.virtual_cash}"
@@ -163,38 +167,41 @@ class BacktestAccountingMixin:
             sum(float(r["net_pnl"]) for r in self._closed_trade_records)
         )
 
-        self.logger.event(
-            "BACKTEST_SELF_CHECK",
-            final_equity=self.final_virtual_equity,
-            initial_cash=self._money(self.params.initial_cash),
-            closed_net_pnl=closed_net,
-            total_commission=self.total_commission,
-            closed_trades=self.closed_trades,
-            total_contracts=self.total_contracts,
-            open_position_size=self.virtual_position_size,
-            passed=True,
-        )
+        if self.logger.wants_event("BACKTEST_SELF_CHECK"):
+            self.logger.event(
+                "BACKTEST_SELF_CHECK",
+                final_equity=self.final_virtual_equity,
+                initial_cash=self._money(self.params.initial_cash),
+                closed_net_pnl=closed_net,
+                total_commission=self.total_commission,
+                closed_trades=self.closed_trades,
+                total_contracts=self.total_contracts,
+                open_position_size=self.virtual_position_size,
+                passed=True,
+            )
 
-        self.logger.event(
-            "BACKTEST_STOP",
-            bar_index=len(self.data),
-            datetime=self.data.datetime.datetime(0) if len(self.data) else None,
-            position_size=self.virtual_position_size,
-            entry_price=self.virtual_entry_price,
-            tp_level=self.tp_level,
-            sl_level=self.sl_level,
-            trade_id=self.trade_id,
-            virtual_cash=self.virtual_cash,
-            unrealized_pnl=unrealized,
-            final_virtual_equity=self.final_virtual_equity,
-            total_commission=self.total_commission,
-        )
+        if self.logger.wants_event("BACKTEST_STOP"):
+            self.logger.event(
+                "BACKTEST_STOP",
+                bar_index=len(self.data),
+                datetime=self.data.datetime.datetime(0) if len(self.data) else None,
+                position_size=self.virtual_position_size,
+                entry_price=self.virtual_entry_price,
+                tp_level=self.tp_level,
+                sl_level=self.sl_level,
+                trade_id=self.trade_id,
+                virtual_cash=self.virtual_cash,
+                unrealized_pnl=unrealized,
+                final_virtual_equity=self.final_virtual_equity,
+                total_commission=self.total_commission,
+            )
 
         if self.virtual_position_size:
-            self.logger.warning(
-                f"OPEN_POSITION_AT_END trade_id = {self.trade_id}; "
-                f"position_size = {self.virtual_position_size}; "
-                f"entry_price = {self.virtual_entry_price}; "
-                f"mark_price = {final_close}; "
-                f"unrealized_pnl = {unrealized}"
-            )
+            if self.logger.wants_warning_or_error():
+                self.logger.warning(
+                    f"OPEN_POSITION_AT_END trade_id = {self.trade_id}; "
+                    f"position_size = {self.virtual_position_size}; "
+                    f"entry_price = {self.virtual_entry_price}; "
+                    f"mark_price = {final_close}; "
+                    f"unrealized_pnl = {unrealized}"
+                )

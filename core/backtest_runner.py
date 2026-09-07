@@ -62,15 +62,16 @@ def run_backtest(
         commtype=bt.CommInfoBase.COMM_FIXED,
     )
 
-    logger.event(
-        "BROKER_START",
-        cash=cerebro.broker.getcash(),
-        value=cerebro.broker.getvalue(),
-        commission_per_side=cfg.REAL_COMMISSION / 2,
-        margin=cfg.REAL_MARGIN,
-        mult=cfg.REAL_MULT,
-        source_of_truth="VIRTUAL_STRATEGY",
-    )
+    if logger.wants_event("BROKER_START"):
+        logger.event(
+            "BROKER_START",
+            cash=cerebro.broker.getcash(),
+            value=cerebro.broker.getvalue(),
+            commission_per_side=cfg.REAL_COMMISSION / 2,
+            margin=cfg.REAL_MARGIN,
+            mult=cfg.REAL_MULT,
+            source_of_truth="VIRTUAL_STRATEGY",
+        )
 
     strategies = cerebro.run()
     first_strat = strategies[0]

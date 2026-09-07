@@ -52,31 +52,34 @@ class BacktestTradeMixin:
         }
         self._trade_records.append(record)
 
-        self.logger.trade(
-            f"ENTRY_SIGNAL trade_id = {self.trade_id}; "
-            f"bar_index = {bar_index}; signal = {signal}; dynamic_size = {size}; "
-            f"execution_model = VIRTUAL_OPEN; entry_price = {entry_price}; "
-            f"entry_slippage = 0.0; commission = {commission}"
-        )
-        self.logger.debug_event(
-            "ORDER_SUBMITTED",
-            trade_id=self.trade_id,
-            bar_index=bar_index,
-            signal=signal,
-            order_ref=None,
-            order_type="VIRTUAL_OPEN",
-            requested_size=size,
-            reference_open=float(self.data.open[0]),
-            execution_price=entry_price,
-            dynamic_slip=0.0,
-            execution_model="VIRTUAL",
-        )
-        self.logger.trade(
-            f"ENTRY_EXECUTED trade_id = {self.trade_id}; direction = {direction}; "
-            f"execution_model = VIRTUAL_OPEN; execution_price = {entry_price}; "
-            f"executed_size = {size}; entry_commission = {commission}; "
-            f"tp_level = {self.tp_level}; sl_level = {self.sl_level}"
-        )
+        if self.logger.wants_trade():
+            self.logger.trade(
+                f"ENTRY_SIGNAL trade_id = {self.trade_id}; "
+                f"bar_index = {bar_index}; signal = {signal}; dynamic_size = {size}; "
+                f"execution_model = VIRTUAL_OPEN; entry_price = {entry_price}; "
+                f"entry_slippage = 0.0; commission = {commission}"
+            )
+        if self.logger.wants_debug_event("ORDER_SUBMITTED"):
+            self.logger.debug_event(
+                "ORDER_SUBMITTED",
+                trade_id=self.trade_id,
+                bar_index=bar_index,
+                signal=signal,
+                order_ref=None,
+                order_type="VIRTUAL_OPEN",
+                requested_size=size,
+                reference_open=float(self.data.open[0]),
+                execution_price=entry_price,
+                dynamic_slip=0.0,
+                execution_model="VIRTUAL",
+            )
+        if self.logger.wants_trade():
+            self.logger.trade(
+                f"ENTRY_EXECUTED trade_id = {self.trade_id}; direction = {direction}; "
+                f"execution_model = VIRTUAL_OPEN; execution_price = {entry_price}; "
+                f"executed_size = {size}; entry_commission = {commission}; "
+                f"tp_level = {self.tp_level}; sl_level = {self.sl_level}"
+            )
 
     def _close_virtual_position(
         self,
@@ -135,45 +138,49 @@ class BacktestTradeMixin:
         )
         self._closed_trade_records.append(record)
 
-        self.logger.trade(
-            f"EXIT_SIGNAL trade_id = {self.trade_id}; reason = {reason}; "
-            f"bar_index = {bar_index}; phase_index = {phase_index}; "
-            f"detected_price = {detected_price}; "
-            f"level = {self.sl_level if reason == 'STOP_LOSS' else self.tp_level}; "
-            f"execution_model = VIRTUAL_INTRABAR; target_exec_price = {exit_price}"
-        )
-        self.logger.trade(
-            f"EXIT_EXECUTED trade_id = {self.trade_id}; reason = {reason}; "
-            f"execution_model = VIRTUAL_INTRABAR; broker_executed_price = None; "
-            f"execution_price = {exit_price}; target_exec_price = {exit_price}; "
-            f"exit_slippage = {self.get_backtest_dynamic_slippage(size)}; "
-            f"executed_size = {size}; exit_commission = {exit_commission}"
-        )
-        self.logger.trade(
-            f"TRADE_CLOSED trade_id = {self.trade_id}; direction = {direction}; "
-            f"size = {size}; entry_price = {self.virtual_entry_price}; "
-            f"exit_price = {exit_price}; gross_pnl = {gross_pnl}; "
-            f"entry_commission = {self.virtual_entry_commission}; "
-            f"exit_commission = {exit_commission}; net_pnl = {net_trade_pnl}; "
-            f"reason = {reason}; execution_model = VIRTUAL"
-        )
-        self.logger.debug_event(
-            "TRADE_UPDATE",
-            trade_id=self.trade_id,
-            status="CLOSED",
-            direction=direction,
-            size=size,
-            entry_price=self.virtual_entry_price,
-            exit_price=exit_price,
-            commission=self._money(
-                self.virtual_entry_commission + exit_commission
-            ),
-            pnl=gross_pnl,
-            pnl_comm=net_trade_pnl,
-            bar_index=bar_index,
-            phase_index=phase_index,
-            datetime=self.data.datetime.datetime(0),
-        )
+        if self.logger.wants_trade():
+            self.logger.trade(
+                f"EXIT_SIGNAL trade_id = {self.trade_id}; reason = {reason}; "
+                f"bar_index = {bar_index}; phase_index = {phase_index}; "
+                f"detected_price = {detected_price}; "
+                f"level = {self.sl_level if reason == 'STOP_LOSS' else self.tp_level}; "
+                f"execution_model = VIRTUAL_INTRABAR; target_exec_price = {exit_price}"
+            )
+        if self.logger.wants_trade():
+            self.logger.trade(
+                f"EXIT_EXECUTED trade_id = {self.trade_id}; reason = {reason}; "
+                f"execution_model = VIRTUAL_INTRABAR; broker_executed_price = None; "
+                f"execution_price = {exit_price}; target_exec_price = {exit_price}; "
+                f"exit_slippage = {self.get_backtest_dynamic_slippage(size)}; "
+                f"executed_size = {size}; exit_commission = {exit_commission}"
+            )
+        if self.logger.wants_trade():
+            self.logger.trade(
+                f"TRADE_CLOSED trade_id = {self.trade_id}; direction = {direction}; "
+                f"size = {size}; entry_price = {self.virtual_entry_price}; "
+                f"exit_price = {exit_price}; gross_pnl = {gross_pnl}; "
+                f"entry_commission = {self.virtual_entry_commission}; "
+                f"exit_commission = {exit_commission}; net_pnl = {net_trade_pnl}; "
+                f"reason = {reason}; execution_model = VIRTUAL"
+            )
+        if self.logger.wants_debug_event("TRADE_UPDATE"):
+            self.logger.debug_event(
+                "TRADE_UPDATE",
+                trade_id=self.trade_id,
+                status="CLOSED",
+                direction=direction,
+                size=size,
+                entry_price=self.virtual_entry_price,
+                exit_price=exit_price,
+                commission=self._money(
+                    self.virtual_entry_commission + exit_commission
+                ),
+                pnl=gross_pnl,
+                pnl_comm=net_trade_pnl,
+                bar_index=bar_index,
+                phase_index=phase_index,
+                datetime=self.data.datetime.datetime(0),
+            )
 
         self.virtual_position_size = 0
         self.virtual_entry_price = None

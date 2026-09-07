@@ -27,50 +27,54 @@ class BacktestSignalMixin:
             max_size_by_liquidity,
         )
 
-        self.logger.debug_event(
-            "POSITION_SIZE",
-            bar_index=bar_index,
-            current_free_funds=current_free_funds,
-            max_rub_to_risk=max_rub_to_risk,
-            loss_per_contract_rub=loss_per_contract_rub,
-            size_by_risk=size_by_risk,
-            cost_margin_per_contract=cost_margin_per_contract,
-            max_size_by_margin=max_size_by_margin,
-            bar_volume=bar_volume,
-            max_size_by_liquidity=max_size_by_liquidity,
-            dynamic_size=dynamic_size,
-        )
+        if self.logger.wants_debug_event("POSITION_SIZE"):
+            self.logger.debug_event(
+                "POSITION_SIZE",
+                bar_index=bar_index,
+                current_free_funds=current_free_funds,
+                max_rub_to_risk=max_rub_to_risk,
+                loss_per_contract_rub=loss_per_contract_rub,
+                size_by_risk=size_by_risk,
+                cost_margin_per_contract=cost_margin_per_contract,
+                max_size_by_margin=max_size_by_margin,
+                bar_volume=bar_volume,
+                max_size_by_liquidity=max_size_by_liquidity,
+                dynamic_size=dynamic_size,
+            )
 
         return dynamic_size
 
     def next(self):
         current_bar_index = len(self.data)
 
-        self.logger.debug_event(
-            "BAR",
-            bar_index=current_bar_index,
-            datetime=self.data.datetime.datetime(0),
-            open=float(self.data.open[0]),
-            high=float(self.data.high[0]),
-            low=float(self.data.low[0]),
-            close=float(self.data.close[0]),
-            volume=float(self.data.volume[0]),
-            position_size=self.virtual_position_size,
-            entry_price=self.virtual_entry_price,
-            tp_level=self.tp_level,
-            sl_level=self.sl_level,
-            current_trail_step=self.current_trail_step,
-        )
+        if self.logger.wants_debug_event("BAR"):
+            self.logger.debug_event(
+                "BAR",
+                bar_index=current_bar_index,
+                datetime=self.data.datetime.datetime(0),
+                open=float(self.data.open[0]),
+                high=float(self.data.high[0]),
+                low=float(self.data.low[0]),
+                close=float(self.data.close[0]),
+                volume=float(self.data.volume[0]),
+                position_size=self.virtual_position_size,
+                entry_price=self.virtual_entry_price,
+                tp_level=self.tp_level,
+                sl_level=self.sl_level,
+                current_trail_step=self.current_trail_step,
+            )
 
-        self._log_virtual_portfolio(current_bar_index)
+        if self.logger.wants_debug_event("PORTFOLIO_STATE"):
+            self._log_virtual_portfolio(current_bar_index)
 
         # The strategy needs one previous available candle, and no more.
         if current_bar_index < 2:
-            self.logger.debug_event(
-                "SIGNAL_EVALUATION_SKIPPED",
-                bar_index=current_bar_index,
-                reason="NO_PREVIOUS_AVAILABLE_BAR",
-            )
+            if self.logger.wants_debug_event("SIGNAL_EVALUATION_SKIPPED"):
+                self.logger.debug_event(
+                    "SIGNAL_EVALUATION_SKIPPED",
+                    bar_index=current_bar_index,
+                    reason="NO_PREVIOUS_AVAILABLE_BAR",
+                )
             return
 
         previous_open = float(self.data.open[-1])
@@ -91,32 +95,33 @@ class BacktestSignalMixin:
         # ATR is intentionally not calculated as a Backtrader indicator.
         atr_diagnostic = None
 
-        self.logger.debug_event(
-            "SIGNAL_EVALUATION",
-            bar_index=current_bar_index,
-            datetime=self.data.datetime.datetime(0),
-            previous_datetime=self.data.datetime.datetime(-1),
-            current_open=float(self.data.open[0]),
-            current_high=float(self.data.high[0]),
-            current_low=float(self.data.low[0]),
-            current_close=float(self.data.close[0]),
-            previous_open=previous_open,
-            previous_high=previous_high,
-            previous_low=previous_low,
-            previous_close=previous_close,
-            previous_volume=previous_volume,
-            previous_range_raw=previous_range_raw,
-            previous_range=previous_range,
-            trigger=self.params.trigger,
-            range_ok=range_ok,
-            previous_bullish=previous_bullish,
-            previous_bearish=previous_bearish,
-            long_signal=long_signal_value,
-            short_signal=short_signal_value,
-            atr=atr_diagnostic,
-            position_size=self.virtual_position_size,
-            main_order_ref=None,
-        )
+        if self.logger.wants_debug_event("SIGNAL_EVALUATION"):
+            self.logger.debug_event(
+                "SIGNAL_EVALUATION",
+                bar_index=current_bar_index,
+                datetime=self.data.datetime.datetime(0),
+                previous_datetime=self.data.datetime.datetime(-1),
+                current_open=float(self.data.open[0]),
+                current_high=float(self.data.high[0]),
+                current_low=float(self.data.low[0]),
+                current_close=float(self.data.close[0]),
+                previous_open=previous_open,
+                previous_high=previous_high,
+                previous_low=previous_low,
+                previous_close=previous_close,
+                previous_volume=previous_volume,
+                previous_range_raw=previous_range_raw,
+                previous_range=previous_range,
+                trigger=self.params.trigger,
+                range_ok=range_ok,
+                previous_bullish=previous_bullish,
+                previous_bearish=previous_bearish,
+                long_signal=long_signal_value,
+                short_signal=short_signal_value,
+                atr=atr_diagnostic,
+                position_size=self.virtual_position_size,
+                main_order_ref=None,
+            )
 
         if self.virtual_position_size:
             self._process_open_position_bar(current_bar_index)
@@ -126,27 +131,29 @@ class BacktestSignalMixin:
             1 if long_signal_value else (-1 if short_signal_value else 0)
         )
 
-        self.logger.debug_event(
-            "SIGNAL_DECISION",
-            bar_index=current_bar_index,
-            long_signal=long_signal_value,
-            short_signal=short_signal_value,
-            selected_signal=selected_signal,
-            previous_range=previous_range,
-            trigger=self.params.trigger,
-            previous_bullish=previous_bullish,
-            previous_bearish=previous_bearish,
-        )
+        if self.logger.wants_debug_event("SIGNAL_DECISION"):
+            self.logger.debug_event(
+                "SIGNAL_DECISION",
+                bar_index=current_bar_index,
+                long_signal=long_signal_value,
+                short_signal=short_signal_value,
+                selected_signal=selected_signal,
+                previous_range=previous_range,
+                trigger=self.params.trigger,
+                previous_bullish=previous_bullish,
+                previous_bearish=previous_bearish,
+            )
 
         if selected_signal == 0:
             return
 
         dynamic_size = self._calculate_position_size(current_bar_index)
         if dynamic_size < 1:
-            self.logger.warning(
-                f"ENTRY_SKIPPED bar_index = {current_bar_index}; "
-                f"reason = POSITION_SIZE_ZERO; signal = {selected_signal}"
-            )
+            if self.logger.wants_warning_or_error():
+                self.logger.warning(
+                    f"ENTRY_SKIPPED bar_index = {current_bar_index}; "
+                    f"reason = POSITION_SIZE_ZERO; signal = {selected_signal}"
+                )
             return
 
         self._open_virtual_position(

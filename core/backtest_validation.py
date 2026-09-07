@@ -59,28 +59,29 @@ def validate_backtest_dataframe(df: pd.DataFrame, logger: BacktestLogger) -> Non
     if (volumes < 0).any():
         raise ValueError("CSV validation failed: negative VOLUME")
 
-    gap_mask = dt.diff() > pd.Timedelta(minutes=1)
-    gap_count = int(gap_mask.sum())
-    gap_examples = [
-        {
-            "previous_datetime": dt.iloc[i - 1],
-            "datetime": dt.iloc[i],
-            "gap_minutes": (dt.iloc[i] - dt.iloc[i - 1]).total_seconds() / 60.0,
-        }
-        for i in range(1, len(dt))
-        if gap_mask.iloc[i]
-    ][:10]
+    if logger.wants_event("CSV_VALIDATION"):
+        gap_mask = dt.diff() > pd.Timedelta(minutes=1)
+        gap_count = int(gap_mask.sum())
+        gap_examples = [
+            {
+                "previous_datetime": dt.iloc[i - 1],
+                "datetime": dt.iloc[i],
+                "gap_minutes": (dt.iloc[i] - dt.iloc[i - 1]).total_seconds() / 60.0,
+            }
+            for i in range(1, len(dt))
+            if gap_mask.iloc[i]
+        ][:10]
 
-    logger.event(
-        "CSV_VALIDATION",
-        rows=len(df),
-        first_datetime=dt.iloc[0],
-        last_datetime=dt.iloc[-1],
-        duplicate_timestamps=0,
-        timestamp_order="INCREASING",
-        gaps_gt_1_minute=gap_count,
-        gap_examples=gap_examples,
-        data_mutation="NONE",
-        previous_available_row_rule=True,
-        passed=True,
-    )
+        logger.event(
+            "CSV_VALIDATION",
+            rows=len(df),
+            first_datetime=dt.iloc[0],
+            last_datetime=dt.iloc[-1],
+            duplicate_timestamps=0,
+            timestamp_order="INCREASING",
+            gaps_gt_1_minute=gap_count,
+            gap_examples=gap_examples,
+            data_mutation="NONE",
+            previous_available_row_rule=True,
+            passed=True,
+        )

@@ -86,22 +86,23 @@ class RealisticFuturesStrategy(
         # any Backtrader indicator can impose a minperiod and delay the strategy.
         self.atr_diagnostic = None
 
-        self.logger.event(
-            "STRATEGY_INIT",
-            trigger=self.params.trigger,
-            tp=self.params.tp,
-            sl=self.params.sl,
-            risk=self.params.risk,
-            real_mult=self.params.real_mult,
-            real_margin=self.params.real_margin,
-            safety_factor=self.params.safety_factor,
-            precision_num=self.params.precision_num,
-            precision_money=self.params.precision_money,
-            dynamic_trail_steps=self.params.dynamic_trail_steps,
-            execution_model="VIRTUAL",
-            entry_model="CURRENT_BAR_OPEN",
-            signal_model="PREVIOUS_AVAILABLE_BAR",
-            intrabar_model="ORDERED_MONOTONIC_PATH",
-            atr_role="DIAGNOSTIC_ONLY",
-            initial_cash=self.virtual_cash,
-        )
+        if self.logger.wants_event("STRATEGY_INIT"):
+            self.logger.event(
+                "STRATEGY_INIT",
+                trigger=self.params.trigger,
+                tp=self.params.tp,
+                sl=self.params.sl,
+                risk=self.params.risk,
+                real_mult=self.params.real_mult,
+                real_margin=self.params.real_margin,
+                safety_factor=self.params.safety_factor,
+                precision_num=self.params.precision_num,
+                precision_money=self.params.precision_money,
+                dynamic_trail_steps=self.params.dynamic_trail_steps,
+                execution_model="VIRTUAL",
+                entry_model="CURRENT_BAR_OPEN",
+                signal_model="PREVIOUS_AVAILABLE_BAR",
+                intrabar_model="ORDERED_MONOTONIC_PATH",
+                atr_role="DIAGNOSTIC_ONLY",
+                initial_cash=self.virtual_cash,
+            )

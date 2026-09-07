@@ -134,7 +134,22 @@ def start_application():
 
     if mode_choice == "1":
         import backtester
-        backtester.run_instrument_backtest(instrument_folder, cfg)
+        print("\nРежим логирования бэктеста:")
+        print(" NONE       - полностью без диагностического логирования")
+        print(" MINIMAL    - только [BACKTEST_RESULT]")
+        print(" FAST       - только значимые события")
+        print(" DIAGNOSTIC - полный диагностический лог")
+        log_mode = input("Введите режим логирования (Enter = DIAGNOSTIC): ").strip().upper()
+        if not log_mode:
+            log_mode = "DIAGNOSTIC"
+        if log_mode not in {"NONE", "MINIMAL", "FAST", "DIAGNOSTIC"}:
+            print("Ошибка: Неверный режим логирования.")
+            return
+        backtester.run_instrument_backtest(
+            instrument_folder,
+            cfg,
+            log_mode=log_mode,
+        )
     elif mode_choice == "2":
         import optimize
         optimize.run_optimization("CSV_PATH_ADD_1MONTH_PATH", "TEST_OPTIMIZE_CSV_PATH_1MONTH_PATH", instrument_folder, cfg)

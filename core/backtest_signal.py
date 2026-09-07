@@ -5,7 +5,7 @@ class BacktestSignalMixin:
     """Signal evaluation and position-sizing logic."""
 
     def _calculate_position_size(self, bar_index: int) -> int:
-        current_free_funds = self.virtual_cash
+        current_free_funds = self.state.virtual_cash
         loss_per_contract_rub = float(self.params.sl) * float(self.params.real_mult)
         max_rub_to_risk = current_free_funds * float(self.params.risk)
         size_by_risk = int(max_rub_to_risk / loss_per_contract_rub)
@@ -57,11 +57,11 @@ class BacktestSignalMixin:
                 low=float(self.data.low[0]),
                 close=float(self.data.close[0]),
                 volume=float(self.data.volume[0]),
-                position_size=self.virtual_position_size,
-                entry_price=self.virtual_entry_price,
-                tp_level=self.tp_level,
-                sl_level=self.sl_level,
-                current_trail_step=self.current_trail_step,
+                position_size=self.state.virtual_position_size,
+                entry_price=self.state.virtual_entry_price,
+                tp_level=self.state.tp_level,
+                sl_level=self.state.sl_level,
+                current_trail_step=self.state.current_trail_step,
             )
 
         if self.logger.wants_debug_event("PORTFOLIO_STATE"):
@@ -119,11 +119,11 @@ class BacktestSignalMixin:
                 long_signal=long_signal_value,
                 short_signal=short_signal_value,
                 atr=atr_diagnostic,
-                position_size=self.virtual_position_size,
+                position_size=self.state.virtual_position_size,
                 main_order_ref=None,
             )
 
-        if self.virtual_position_size:
+        if self.state.virtual_position_size:
             self._process_open_position_bar(current_bar_index)
             return
 

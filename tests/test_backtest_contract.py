@@ -15,6 +15,7 @@ from core.backtest_commission import BacktestCommissionMixin
 from core.backtest_execution import BacktestExecutionMixin
 from core.backtest_numeric import BacktestNumericMixin
 from core.backtest_signal import BacktestSignalMixin
+from core.backtest_state import BacktestState
 from core.backtest_trade import BacktestTradeMixin
 from core.backtest_trailing import BacktestTrailingMixin
 
@@ -147,11 +148,103 @@ class VirtualStrategyContract(
     BacktestCommissionMixin,
     BacktestSignalMixin,
 ):
+    # Test-only compatibility facade. Production mixins access state directly.
+    @property
+    def trade_id(self): return self.state.trade_id
+    @trade_id.setter
+    def trade_id(self, value): self.state.trade_id = value
+
+    @property
+    def last_trade_bar(self): return self.state.last_trade_bar
+    @last_trade_bar.setter
+    def last_trade_bar(self, value): self.state.last_trade_bar = value
+
+    @property
+    def virtual_cash(self): return self.state.virtual_cash
+    @virtual_cash.setter
+    def virtual_cash(self, value): self.state.virtual_cash = value
+
+    @property
+    def virtual_position_size(self): return self.state.virtual_position_size
+    @virtual_position_size.setter
+    def virtual_position_size(self, value): self.state.virtual_position_size = value
+
+    @property
+    def virtual_entry_price(self): return self.state.virtual_entry_price
+    @virtual_entry_price.setter
+    def virtual_entry_price(self, value): self.state.virtual_entry_price = value
+
+    @property
+    def virtual_entry_commission(self): return self.state.virtual_entry_commission
+    @virtual_entry_commission.setter
+    def virtual_entry_commission(self, value): self.state.virtual_entry_commission = value
+
+    @property
+    def virtual_exit_commission(self): return self.state.virtual_exit_commission
+    @virtual_exit_commission.setter
+    def virtual_exit_commission(self, value): self.state.virtual_exit_commission = value
+
+    @property
+    def virtual_gross_pnl(self): return self.state.virtual_gross_pnl
+    @virtual_gross_pnl.setter
+    def virtual_gross_pnl(self, value): self.state.virtual_gross_pnl = value
+
+    @property
+    def entry_price(self): return self.state.entry_price
+    @entry_price.setter
+    def entry_price(self, value): self.state.entry_price = value
+
+    @property
+    def tp_level(self): return self.state.tp_level
+    @tp_level.setter
+    def tp_level(self, value): self.state.tp_level = value
+
+    @property
+    def sl_level(self): return self.state.sl_level
+    @sl_level.setter
+    def sl_level(self, value): self.state.sl_level = value
+
+    @property
+    def current_trail_step(self): return self.state.current_trail_step
+    @current_trail_step.setter
+    def current_trail_step(self, value): self.state.current_trail_step = value
+
+    @property
+    def closed_trades(self): return self.state.closed_trades
+    @closed_trades.setter
+    def closed_trades(self, value): self.state.closed_trades = value
+
+    @property
+    def total_contracts(self): return self.state.total_contracts
+    @total_contracts.setter
+    def total_contracts(self, value): self.state.total_contracts = value
+
+    @property
+    def total_commission(self): return self.state.total_commission
+    @total_commission.setter
+    def total_commission(self, value): self.state.total_commission = value
+
+    @property
+    def final_virtual_equity(self): return self.state.final_virtual_equity
+    @final_virtual_equity.setter
+    def final_virtual_equity(self, value): self.state.final_virtual_equity = value
+
+    @property
+    def _trade_records(self): return self.state.trade_records
+    @_trade_records.setter
+    def _trade_records(self, value): self.state.trade_records = value
+
+    @property
+    def _closed_trade_records(self): return self.state.closed_trade_records
+    @_closed_trade_records.setter
+    def _closed_trade_records(self, value): self.state.closed_trade_records = value
+
     def __init__(self, *, bar: Bar, position: int, entry: float, sl: float, tp: float):
         self.params = Params()
         self.logger = DummyLogger()
         self.data = DummyData(bar)
         self.broker = DummyBroker()
+        self.state = BacktestState()
 
         self.trade_id = 1
         self.last_trade_bar = -1

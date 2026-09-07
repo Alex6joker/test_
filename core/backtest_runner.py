@@ -78,22 +78,22 @@ def run_backtest(
 
     return BacktestResult(
         final_portfolio_value=round(
-            float(first_strat.final_virtual_equity),
+            float(first_strat.state.final_virtual_equity),
             precision_money,
         ),
         real_net_profit=round(
-            float(first_strat.final_virtual_equity) - float(cfg.INITIAL_CASH),
+            float(first_strat.state.final_virtual_equity) - float(cfg.INITIAL_CASH),
             precision_money,
         ),
-        total_closed_trades=int(first_strat.closed_trades),
-        total_contracts=int(first_strat.total_contracts),
+        total_closed_trades=int(first_strat.state.closed_trades),
+        total_contracts=int(first_strat.state.total_contracts),
         total_commission=round(
-            float(first_strat.total_commission),
+            float(first_strat.state.total_commission),
             precision_money,
         ),
-        open_position_size=first_strat.virtual_position_size,
+        open_position_size=first_strat.state.virtual_position_size,
         virtual_cash=round(
-            float(first_strat.virtual_cash),
+            float(first_strat.state.virtual_cash),
             precision_money,
         ),
     )

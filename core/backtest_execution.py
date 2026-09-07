@@ -25,7 +25,7 @@ class BacktestExecutionMixin:
 
         Returns True if the position was closed.
         """
-        if not self.virtual_position_size:
+        if not self.state.virtual_position_size:
             return True
 
         start = self._price(start_price)
@@ -34,7 +34,7 @@ class BacktestExecutionMixin:
             # A zero-length phase cannot cross a level.
             return False
 
-        direction = 1 if self.virtual_position_size > 0 else -1
+        direction = 1 if self.state.virtual_position_size > 0 else -1
         moving_up = end > start
 
         # For a LONG, favorable movement is upward; for a SHORT, favorable
@@ -52,23 +52,23 @@ class BacktestExecutionMixin:
 
         # Exit levels are checked on the actual movement direction.
         if direction > 0:
-            if not moving_up and end <= self.sl_level < start:
-                events.append(("STOP_LOSS", self.sl_level, None, None))
-            elif moving_up and start <= self.sl_level <= end:
+            if not moving_up and end <= self.state.sl_level < start:
+                events.append(("STOP_LOSS", self.state.sl_level, None, None))
+            elif moving_up and start <= self.state.sl_level <= end:
                 # This can only happen if a previously moved stop is already
                 # at/above the current path start.
-                events.append(("STOP_LOSS", self.sl_level, None, None))
+                events.append(("STOP_LOSS", self.state.sl_level, None, None))
 
-            if moving_up and start <= self.tp_level <= end:
-                events.append(("TAKE_PROFIT", self.tp_level, None, None))
+            if moving_up and start <= self.state.tp_level <= end:
+                events.append(("TAKE_PROFIT", self.state.tp_level, None, None))
         else:
-            if moving_up and start <= self.sl_level <= end:
-                events.append(("STOP_LOSS", self.sl_level, None, None))
-            elif not moving_up and end <= self.sl_level <= start:
-                events.append(("STOP_LOSS", self.sl_level, None, None))
+            if moving_up and start <= self.state.sl_level <= end:
+                events.append(("STOP_LOSS", self.state.sl_level, None, None))
+            elif not moving_up and end <= self.state.sl_level <= start:
+                events.append(("STOP_LOSS", self.state.sl_level, None, None))
 
-            if not moving_up and end <= self.tp_level <= start:
-                events.append(("TAKE_PROFIT", self.tp_level, None, None))
+            if not moving_up and end <= self.state.tp_level <= start:
+                events.append(("TAKE_PROFIT", self.state.tp_level, None, None))
 
         # Sort by actual traversal order. At equal price, exits take priority
         # over trail activation so a level cannot retroactively protect itself.
@@ -79,7 +79,7 @@ class BacktestExecutionMixin:
 
         current_price = start
         for event_type, event_price, step_idx, new_sl in events:
-            if not self.virtual_position_size:
+            if not self.state.virtual_position_size:
                 return True
 
             # Ignore stale events made obsolete by an earlier event.
@@ -98,40 +98,40 @@ class BacktestExecutionMixin:
                 )
                 continue
 
-            size = abs(self.virtual_position_size)
+            size = abs(self.state.virtual_position_size)
             slippage = self.get_backtest_dynamic_slippage(size)
 
             if event_type == "STOP_LOSS":
                 detected_price = current_price
-                if self.virtual_position_size > 0:
+                if self.state.virtual_position_size > 0:
                     target_exec_price = self._price(
-                        self.sl_level - slippage
+                        self.state.sl_level - slippage
                     )
                 else:
                     target_exec_price = self._price(
-                        self.sl_level + slippage
+                        self.state.sl_level + slippage
                     )
             else:
                 detected_price = current_price
-                if self.virtual_position_size > 0:
+                if self.state.virtual_position_size > 0:
                     target_exec_price = self._price(
-                        self.tp_level - slippage
+                        self.state.tp_level - slippage
                     )
                 else:
                     target_exec_price = self._price(
-                        self.tp_level + slippage
+                        self.state.tp_level + slippage
                     )
 
             if self.logger.wants_debug_event("EXIT_CROSSING"):
                 self.logger.debug_event(
                     "EXIT_CROSSING",
-                    trade_id=self.trade_id,
+                    trade_id=self.state.trade_id,
                     bar_index=bar_index,
                     phase_index=phase_index,
                     event_type=event_type,
                     crossing_price=current_price,
-                    sl_level=self.sl_level,
-                    tp_level=self.tp_level,
+                    sl_level=self.state.sl_level,
+                    tp_level=self.state.tp_level,
                     slippage=slippage,
                 )
 
@@ -161,7 +161,7 @@ class BacktestExecutionMixin:
             points = [b_open, b_high, b_low, b_close]
 
         for phase_index in range(len(points) - 1):
-            if not self.virtual_position_size:
+            if not self.state.virtual_position_size:
                 break
 
             start_price = points[phase_index]
@@ -170,7 +170,7 @@ class BacktestExecutionMixin:
             if self.logger.wants_debug_event("INTRABAR_PHASE"):
                 self.logger.debug_event(
                     "INTRABAR_PHASE",
-                    trade_id=self.trade_id,
+                    trade_id=self.state.trade_id,
                     bar_index=bar_index,
                     phase_index=phase_index,
                     start_price=start_price,
@@ -178,10 +178,10 @@ class BacktestExecutionMixin:
                     direction="UP" if end_price > start_price else (
                         "DOWN" if end_price < start_price else "FLAT"
                     ),
-                    entry_price=self.virtual_entry_price,
-                    tp_level=self.tp_level,
-                    sl_level=self.sl_level,
-                    current_trail_step=self.current_trail_step,
+                    entry_price=self.state.virtual_entry_price,
+                    tp_level=self.state.tp_level,
+                    sl_level=self.state.sl_level,
+                    current_trail_step=self.state.current_trail_step,
                 )
 
             closed = self._process_monotonic_segment(
@@ -194,29 +194,29 @@ class BacktestExecutionMixin:
             if self.logger.wants_debug_event("TRAIL_EVALUATION"):
                 self.logger.debug_event(
                     "TRAIL_EVALUATION",
-                    trade_id=self.trade_id,
+                    trade_id=self.state.trade_id,
                     bar_index=bar_index,
                     phase_index=phase_index,
-                    position_size=self.virtual_position_size,
+                    position_size=self.state.virtual_position_size,
                     start_price=start_price,
                     end_price=end_price,
-                    entry_price=self.virtual_entry_price,
-                    tp_level=self.tp_level,
-                    sl_level=self.sl_level,
-                    current_trail_step=self.current_trail_step,
+                    entry_price=self.state.virtual_entry_price,
+                    tp_level=self.state.tp_level,
+                    sl_level=self.state.sl_level,
+                    current_trail_step=self.state.current_trail_step,
                 )
 
             if self.logger.wants_debug_event("EXIT_EVALUATION"):
                 self.logger.debug_event(
                     "EXIT_EVALUATION",
-                    trade_id=self.trade_id,
+                    trade_id=self.state.trade_id,
                     bar_index=bar_index,
                     phase_index=phase_index,
-                    position_size=self.virtual_position_size,
+                    position_size=self.state.virtual_position_size,
                     start_price=start_price,
                     end_price=end_price,
-                    tp_level=self.tp_level,
-                    sl_level=self.sl_level,
+                    tp_level=self.state.tp_level,
+                    sl_level=self.state.sl_level,
                     closed=closed,
                 )
 

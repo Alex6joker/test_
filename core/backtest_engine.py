@@ -24,6 +24,7 @@ from core.backtest_execution import BacktestExecutionMixin
 from core.backtest_logger import BacktestLogger
 from core.backtest_numeric import BacktestNumericMixin
 from core.backtest_signal import BacktestSignalMixin
+from core.backtest_state import BacktestState
 from core.backtest_trade import BacktestTradeMixin
 from core.backtest_trailing import BacktestTrailingMixin
 
@@ -59,32 +60,15 @@ class RealisticFuturesStrategy(
     def __init__(self):
         self.logger = self.params.logger or BacktestLogger()
 
-        self.trade_id = 0
-        self.last_trade_bar = -1
+        initial_cash = self._money(self.params.initial_cash)
+        self.state = BacktestState(
+            virtual_cash=initial_cash,
+            final_virtual_equity=initial_cash,
+        )
 
-        self.virtual_cash = self._money(self.params.initial_cash)
-        self.virtual_position_size = 0
-        self.virtual_entry_price = None
-        self.virtual_entry_commission = 0.0
-        self.virtual_gross_pnl = 0.0
-        self.virtual_exit_commission = 0.0
-
-        self.entry_price = None
-        self.tp_level = None
-        self.sl_level = None
-        self.current_trail_step = -1
-
-        self.closed_trades = 0
-        self.total_contracts = 0
-        self.total_commission = 0.0
-        self.final_virtual_equity = self.virtual_cash
-
-        self._trade_records: list[dict[str, Any]] = []
-        self._closed_trade_records: list[dict[str, Any]] = []
-
+        # BacktestState is the single owner of mutable virtual-backtest state.
         # Deliberately no ATR indicator:
         # any Backtrader indicator can impose a minperiod and delay the strategy.
-        self.atr_diagnostic = None
 
         if self.logger.wants_event("STRATEGY_INIT"):
             self.logger.event(
@@ -104,5 +88,5 @@ class RealisticFuturesStrategy(
                 signal_model="PREVIOUS_AVAILABLE_BAR",
                 intrabar_model="ORDERED_MONOTONIC_PATH",
                 atr_role="DIAGNOSTIC_ONLY",
-                initial_cash=self.virtual_cash,
+                initial_cash=self.state.virtual_cash,
             )

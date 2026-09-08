@@ -18,7 +18,10 @@ class BacktestSignalMixin:
         )
 
         # Same liquidity rule as live engine: previous available candle volume.
-        bar_volume = int(self.data.volume[-1])
+        previous_bar = self.market.previous_bar
+        if previous_bar is None:
+            raise RuntimeError("Market.previous_bar is required for position sizing")
+        bar_volume = int(previous_bar.volume)
         max_size_by_liquidity = max(1, int(bar_volume * 0.05))
 
         dynamic_size = min(
@@ -45,18 +48,20 @@ class BacktestSignalMixin:
         return dynamic_size
 
     def next(self):
-        current_bar_index = len(self.data)
+        current_bar = self._bar_adapter.to_bar(self.data)
+        self.market.observe(current_bar)
+        current_bar_index = self.market.bar_index
 
         if self.logger.wants_debug_event("BAR"):
             self.logger.debug_event(
                 "BAR",
                 bar_index=current_bar_index,
-                datetime=self.data.datetime.datetime(0),
-                open=float(self.data.open[0]),
-                high=float(self.data.high[0]),
-                low=float(self.data.low[0]),
-                close=float(self.data.close[0]),
-                volume=float(self.data.volume[0]),
+                datetime=current_bar.datetime,
+                open=current_bar.open,
+                high=current_bar.high,
+                low=current_bar.low,
+                close=current_bar.close,
+                volume=current_bar.volume,
                 position_size=self.state.virtual_position_size,
                 entry_price=self.state.virtual_entry_price,
                 tp_level=self.state.tp_level,
@@ -77,11 +82,15 @@ class BacktestSignalMixin:
                 )
             return
 
-        previous_open = float(self.data.open[-1])
-        previous_high = float(self.data.high[-1])
-        previous_low = float(self.data.low[-1])
-        previous_close = float(self.data.close[-1])
-        previous_volume = int(self.data.volume[-1])
+        previous_bar = self.market.previous_bar
+        if previous_bar is None:
+            raise RuntimeError("Market.previous_bar is required for signal evaluation")
+
+        previous_open = previous_bar.open
+        previous_high = previous_bar.high
+        previous_low = previous_bar.low
+        previous_close = previous_bar.close
+        previous_volume = previous_bar.volume
 
         previous_range_raw = previous_high - previous_low
         previous_range = self._price(previous_range_raw)
@@ -99,12 +108,12 @@ class BacktestSignalMixin:
             self.logger.debug_event(
                 "SIGNAL_EVALUATION",
                 bar_index=current_bar_index,
-                datetime=self.data.datetime.datetime(0),
-                previous_datetime=self.data.datetime.datetime(-1),
-                current_open=float(self.data.open[0]),
-                current_high=float(self.data.high[0]),
-                current_low=float(self.data.low[0]),
-                current_close=float(self.data.close[0]),
+                datetime=current_bar.datetime,
+                previous_datetime=previous_bar.datetime,
+                current_open=current_bar.open,
+                current_high=current_bar.high,
+                current_low=current_bar.low,
+                current_close=current_bar.close,
                 previous_open=previous_open,
                 previous_high=previous_high,
                 previous_low=previous_low,

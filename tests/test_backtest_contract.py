@@ -11,6 +11,9 @@ core_pkg.__path__ = [__import__("os").path.join(__import__("os").path.dirname(__
 sys.modules.setdefault("core", core_pkg)
 
 from core.backtest_accounting import BacktestAccountingMixin
+from core.backtest_adapter import BacktraderBarAdapter
+from core.backtest_market import Market
+from core.backtest_bar import Bar as MarketBar
 from core.backtest_commission import BacktestCommissionMixin
 from core.backtest_execution import BacktestExecutionMixin
 from core.backtest_numeric import BacktestNumericMixin
@@ -244,6 +247,8 @@ class VirtualStrategyContract(
         self.logger = DummyLogger()
         self.data = DummyData(bar)
         self.broker = DummyBroker()
+        self.market = Market()
+        self._bar_adapter = BacktraderBarAdapter()
         self.state = BacktestState()
 
         self.trade_id = 1
@@ -296,7 +301,13 @@ class BacktestContractTests(unittest.TestCase):
             tp=105.0,
         )
         s.virtual_cash = 264000.0
-        s.data.volume = Line(100)
+        s.data.volume = Line(1)
+        s.market.observe(
+            MarketBar(datetime(2026, 1, 1, 9, 59), 99.0, 100.0, 98.0, 99.5, 100)
+        )
+        s.market.observe(
+            MarketBar(datetime(2026, 1, 1, 10, 0), 100.0, 101.0, 99.0, 100.5, 100)
+        )
         size = s._calculate_position_size(10)
         # Risk allows 60 contracts, margin allows 12, liquidity allows 5.
         self.assertEqual(size, 5)
@@ -444,11 +455,13 @@ class BacktestContractTests(unittest.TestCase):
             sl=0.0,
             tp=0.0,
         )
-        s.data = MultiBarData(
-            [Bar(100.0, 101.0, 99.0, 100.5), Bar(102.0, 102.2, 101.8, 102.0)],
-            [100, 100],
-            1,
-        )
+        bars = [
+            Bar(100.0, 101.0, 99.0, 100.5),
+            Bar(102.0, 102.2, 101.8, 102.0),
+        ]
+        s.data = MultiBarData(bars, [100, 100], 0)
+        s.next()
+        s.data = MultiBarData(bars, [100, 100], 1)
         s.next()
         self.assertEqual(s.virtual_entry_price, 102.0)
         self.assertEqual(s._trade_records[-1]["entry_bar"], 2)
@@ -461,11 +474,13 @@ class BacktestContractTests(unittest.TestCase):
             sl=0.0,
             tp=0.0,
         )
-        s.data = MultiBarData(
-            [Bar(100.0, 101.0, 99.0, 100.5), Bar(102.0, 104.0, 101.5, 103.0)],
-            [100, 100],
-            1,
-        )
+        bars = [
+            Bar(100.0, 101.0, 99.0, 100.5),
+            Bar(102.0, 104.0, 101.5, 103.0),
+        ]
+        s.data = MultiBarData(bars, [100, 100], 0)
+        s.next()
+        s.data = MultiBarData(bars, [100, 100], 1)
         s.next()
         self.assertEqual(s._trade_records[-1]["entry_price"], 102.0)
         self.assertEqual(s._trade_records[-1]["exit_reason"], "TAKE_PROFIT")

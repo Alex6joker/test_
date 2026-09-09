@@ -1,25 +1,82 @@
 from __future__ import annotations
 
 
-class BacktestAccountingMixin:
-    """Accounting and portfolio-state operations for the virtual backtest engine."""
+class AccountingEngine:
+    """Money, P&L and portfolio accounting for the virtual backtest."""
 
-    def _unrealized_pnl(self, mark_price: float | None = None) -> float:
+    def __init__(self, state, params, money_fn, commission_per_side_fn) -> None:
+        self.state = state
+        self.params = params
+        self._money = money_fn
+        self._commission_per_side = commission_per_side_fn
+
+    def entry_commission(self, size: int) -> float:
+        return self._money(self._commission_per_side() * size)
+
+    def exit_commission(self, size: int) -> float:
+        return self._money(self._commission_per_side() * size)
+
+    def apply_entry(self, commission: float) -> None:
+        self.state.virtual_cash = self._money(self.state.virtual_cash - commission)
+        self.state.total_commission = self._money(
+            self.state.total_commission + commission
+        )
+
+    def gross_pnl(self, entry_price: float, exit_price: float, direction: int, size: int) -> float:
+        if direction > 0:
+            pnl = (exit_price - entry_price) * self.params.real_mult * size
+        else:
+            pnl = (entry_price - exit_price) * self.params.real_mult * size
+        return self._money(pnl)
+
+    def net_trade_pnl(
+        self,
+        gross_pnl: float,
+        entry_commission: float,
+        exit_commission: float,
+    ) -> float:
+        return self._money(gross_pnl - entry_commission - exit_commission)
+
+    def apply_exit(self, gross_pnl: float, exit_commission: float) -> None:
+        self.state.virtual_cash = self._money(
+            self.state.virtual_cash + gross_pnl - exit_commission
+        )
+        self.state.total_commission = self._money(
+            self.state.total_commission + exit_commission
+        )
+
+    def unrealized_pnl(self, mark_price: float) -> float:
         if not self.state.virtual_position_size or self.state.virtual_entry_price is None:
             return 0.0
-        if mark_price is None:
-            mark_price = float(self.data.close[0])
-
         size = abs(self.state.virtual_position_size)
         if self.state.virtual_position_size > 0:
             pnl = (
-                float(mark_price) - self.state.virtual_entry_price
+                mark_price - self.state.virtual_entry_price
             ) * self.params.real_mult * size
         else:
             pnl = (
-                self.state.virtual_entry_price - float(mark_price)
+                self.state.virtual_entry_price - mark_price
             ) * self.params.real_mult * size
         return self._money(pnl)
+
+
+class BacktestAccountingMixin:
+    """Accounting and portfolio-state operations for the virtual backtest."""
+
+    def _ensure_accounting_engine(self) -> AccountingEngine:
+        if not hasattr(self, "_accounting_engine"):
+            self._accounting_engine = AccountingEngine(
+                self.state,
+                self.params,
+                self._money,
+                self._get_commission_per_side,
+            )
+        return self._accounting_engine
+
+    def _unrealized_pnl(self, mark_price: float | None = None) -> float:
+        if mark_price is None:
+            mark_price = float(self.data.close[0])
+        return self._ensure_accounting_engine().unrealized_pnl(mark_price)
 
     def _log_virtual_portfolio(self, bar_index: int):
         unrealized = self._unrealized_pnl()
@@ -75,52 +132,7 @@ class BacktestAccountingMixin:
             )
 
     def _check_trade_lifecycle(self):
-        errors = []
-        if self.state.trade_id != len(self.state.trade_records):
-            errors.append(
-                f"trade_id={self.state.trade_id} records={len(self.state.trade_records)}"
-            )
-
-        for expected_id, record in enumerate(self.state.trade_records, start=1):
-            if record["trade_id"] != expected_id:
-                errors.append(
-                    f"non-sequential trade_id={record['trade_id']} expected={expected_id}"
-                )
-            closed = record["exit_bar"] is not None
-            if closed:
-                if record["exit_price"] is None or record["net_pnl"] is None:
-                    errors.append(
-                        f"trade_id={record['trade_id']} marked closed without exit data"
-                    )
-            else:
-                if record["exit_price"] is not None or record["net_pnl"] is not None:
-                    errors.append(
-                        f"trade_id={record['trade_id']} has partial exit data"
-                    )
-
-        closed_count = sum(
-            1 for record in self.state.trade_records if record["exit_bar"] is not None
-        )
-        if closed_count != self.state.closed_trades:
-            errors.append(
-                f"closed_trades={self.state.closed_trades} records={closed_count}"
-            )
-
-        if self.state.virtual_position_size:
-            open_records = [
-                r for r in self.state.trade_records if r["exit_bar"] is None
-            ]
-            if len(open_records) != 1:
-                errors.append(
-                    f"open_position={self.state.virtual_position_size} open_records={len(open_records)}"
-                )
-            elif open_records[0]["trade_id"] != self.state.trade_id:
-                errors.append("open trade is not the latest trade")
-        else:
-            if any(r["exit_bar"] is None for r in self.state.trade_records):
-                errors.append("open trade record exists while position is flat")
-
-        passed = not errors
+        errors = self._ensure_trade_ledger().check()
         if self.logger.wants_event("TRADE_LIFECYCLE_CHECK"):
             self.logger.event(
                 "TRADE_LIFECYCLE_CHECK",
@@ -128,9 +140,8 @@ class BacktestAccountingMixin:
                 closed_trade_count=self.state.closed_trades,
                 open_position_size=self.state.virtual_position_size,
                 errors=errors,
-                passed=passed,
+                passed=not errors,
             )
-
         if errors:
             raise RuntimeError(
                 "Trade lifecycle self-check failed: " + "; ".join(errors)
@@ -158,7 +169,6 @@ class BacktestAccountingMixin:
             self.state.virtual_cash + unrealized
         )
 
-        # These checks are deliberately performed before the final result.
         self._check_negative_cash()
         self._check_trade_lifecycle()
         self._check_accounting()

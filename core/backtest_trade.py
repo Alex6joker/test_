@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+from .backtest_trade_ledger import TradeLedger
+
 
 class BacktestTradeMixin:
-    """Virtual trade lifecycle operations: entry and exit."""
+    """Compatibility/orchestration layer for virtual trade lifecycle."""
+
+    def _ensure_trade_ledger(self) -> TradeLedger:
+        if not hasattr(self, "_trade_ledger"):
+            self._trade_ledger = TradeLedger(self.state)
+        return self._trade_ledger
 
     def _open_virtual_position(self, signal: int, size: int, bar_index: int):
         entry_price = self._price(self.data.open[0])
-        commission = self._money(self._get_commission_per_side() * size)
+        accounting = self._ensure_accounting_engine()
+        commission = accounting.entry_commission(size)
+        ledger = self._ensure_trade_ledger()
 
-        self.state.trade_id += 1
         direction = "LONG" if signal > 0 else "SHORT"
         signed_size = size if signal > 0 else -size
 
@@ -19,8 +27,7 @@ class BacktestTradeMixin:
         self.state.virtual_exit_commission = 0.0
         self.state.virtual_gross_pnl = 0.0
 
-        self.state.virtual_cash = self._money(self.state.virtual_cash - commission)
-        self.state.total_commission = self._money(self.state.total_commission + commission)
+        accounting.apply_entry(commission)
         self.state.last_trade_bar = bar_index
         self.state.current_trail_step = -1
 
@@ -34,23 +41,14 @@ class BacktestTradeMixin:
             self.state.tp_level = self._price(entry_price - tp_distance)
             self.state.sl_level = self._price(entry_price + sl_distance)
 
-        record = {
-            "trade_id": self.state.trade_id,
-            "direction": direction,
-            "size": size,
-            "entry_bar": bar_index,
-            "entry_datetime": self.data.datetime.datetime(0),
-            "entry_price": entry_price,
-            "entry_commission": commission,
-            "exit_bar": None,
-            "exit_phase": None,
-            "exit_price": None,
-            "exit_reason": None,
-            "exit_commission": 0.0,
-            "gross_pnl": 0.0,
-            "net_pnl": None,
-        }
-        self.state.trade_records.append(record)
+        ledger.open_trade(
+            direction=direction,
+            size=size,
+            bar_index=bar_index,
+            entry_datetime=self.data.datetime.datetime(0),
+            entry_price=entry_price,
+            entry_commission=commission,
+        )
 
         if self.logger.wants_trade():
             self.logger.trade(
@@ -93,50 +91,37 @@ class BacktestTradeMixin:
             raise RuntimeError("Attempted to close a virtual position that is not open")
 
         size = abs(self.state.virtual_position_size)
-        direction = "LONG" if self.state.virtual_position_size > 0 else "SHORT"
+        direction_sign = 1 if self.state.virtual_position_size > 0 else -1
+        direction = "LONG" if direction_sign > 0 else "SHORT"
         exit_price = self._price(target_exec_price)
+        accounting = self._ensure_accounting_engine()
 
-        if self.state.virtual_position_size > 0:
-            gross_pnl = (
-                exit_price - self.state.virtual_entry_price
-            ) * self.params.real_mult * size
-        else:
-            gross_pnl = (
-                self.state.virtual_entry_price - exit_price
-            ) * self.params.real_mult * size
-        gross_pnl = self._money(gross_pnl)
-
-        exit_commission = self._money(
-            self._get_commission_per_side() * size
+        gross_pnl = accounting.gross_pnl(
+            self.state.virtual_entry_price,
+            exit_price,
+            direction_sign,
+            size,
         )
-        net_trade_pnl = self._money(
-            gross_pnl - self.state.virtual_entry_commission - exit_commission
+        exit_commission = accounting.exit_commission(size)
+        net_trade_pnl = accounting.net_trade_pnl(
+            gross_pnl,
+            self.state.virtual_entry_commission,
+            exit_commission,
         )
 
-        self.state.virtual_cash = self._money(
-            self.state.virtual_cash + gross_pnl - exit_commission
-        )
+        accounting.apply_exit(gross_pnl, exit_commission)
         self.state.virtual_gross_pnl = gross_pnl
         self.state.virtual_exit_commission = exit_commission
-        self.state.total_commission = self._money(
-            self.state.total_commission + exit_commission
-        )
 
-        record = self.state.trade_records[-1]
-        if record["trade_id"] != self.state.trade_id:
-            raise RuntimeError("Trade lifecycle order is corrupted")
-        record.update(
-            {
-                "exit_bar": bar_index,
-                "exit_phase": phase_index,
-                "exit_price": exit_price,
-                "exit_reason": reason,
-                "exit_commission": exit_commission,
-                "gross_pnl": gross_pnl,
-                "net_pnl": net_trade_pnl,
-            }
+        self._ensure_trade_ledger().close_trade(
+            bar_index=bar_index,
+            phase_index=phase_index,
+            exit_price=exit_price,
+            reason=reason,
+            exit_commission=exit_commission,
+            gross_pnl=gross_pnl,
+            net_pnl=net_trade_pnl,
         )
-        self.state.closed_trade_records.append(record)
 
         if self.logger.wants_trade():
             self.logger.trade(

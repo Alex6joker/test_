@@ -12,7 +12,10 @@ class BacktestTradeMixin:
         return self._trade_ledger
 
     def _open_virtual_position(self, signal: int, size: int, bar_index: int):
-        entry_price = self._price(self.data.open[0])
+        current_bar = self.market.current_bar
+        if current_bar is None:
+            raise RuntimeError("Market.current_bar is required to open a virtual position")
+        entry_price = self._price(current_bar.open)
         accounting = self._ensure_accounting_engine()
         commission = accounting.entry_commission(size)
         ledger = self._ensure_trade_ledger()
@@ -45,7 +48,7 @@ class BacktestTradeMixin:
             direction=direction,
             size=size,
             bar_index=bar_index,
-            entry_datetime=self.data.datetime.datetime(0),
+            entry_datetime=current_bar.datetime,
             entry_price=entry_price,
             entry_commission=commission,
         )
@@ -66,7 +69,7 @@ class BacktestTradeMixin:
                 order_ref=None,
                 order_type="VIRTUAL_OPEN",
                 requested_size=size,
-                reference_open=float(self.data.open[0]),
+                reference_open=current_bar.open,
                 execution_price=entry_price,
                 dynamic_slip=0.0,
                 execution_model="VIRTUAL",
@@ -164,7 +167,7 @@ class BacktestTradeMixin:
                 pnl_comm=net_trade_pnl,
                 bar_index=bar_index,
                 phase_index=phase_index,
-                datetime=self.data.datetime.datetime(0),
+                datetime=self.market.current_bar.datetime if self.market.current_bar else None,
             )
 
         self.state.virtual_position_size = 0

@@ -6,6 +6,7 @@ import backtrader as bt
 
 from core.backtest_engine import RealisticFuturesStrategy
 from core.backtest_result import BacktestResult
+from core.backtest_adapter import BacktraderFeedAdapter
 
 
 def run_backtest(
@@ -33,21 +34,7 @@ def run_backtest(
         initial_cash=cfg.INITIAL_CASH,
     )
 
-    data = bt.feeds.GenericCSVData(
-        dataname=processed_path,
-        sep=",",
-        dtformat="%Y%m%d %H%M%S",
-        timeframe=bt.TimeFrame.Minutes,
-        datetime=0,
-        time=-1,
-        open=1,
-        high=2,
-        low=3,
-        close=4,
-        volume=5,
-        openinterest=-1,
-        headers=True,
-    )
+    data = BacktraderFeedAdapter.create_feed(processed_path)
     cerebro.adddata(data)
 
     # Backtrader's broker is deliberately not the source of fills/P&L.

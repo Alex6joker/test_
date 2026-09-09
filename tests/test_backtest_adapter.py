@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import importlib.util
 import types
 import unittest
 from datetime import datetime
@@ -10,7 +11,7 @@ core_pkg = types.ModuleType("core")
 core_pkg.__path__ = [os.path.join(os.path.dirname(__file__), "..", "core")]
 sys.modules.setdefault("core", core_pkg)
 
-from core.backtest_adapter import BacktraderBarAdapter
+from core.backtest_adapter import BacktraderBarAdapter, BacktraderFeedAdapter
 from core.backtest_bar import Bar
 from core.backtest_market import Market
 
@@ -117,6 +118,18 @@ class BacktestAdapterTests(unittest.TestCase):
         self.assertIs(market.previous_bar, previous_bar)
         self.assertIs(market.current_bar, current_bar)
         self.assertEqual(market.bar_index, 2)
+
+    @unittest.skipUnless(importlib.util.find_spec("backtrader"), "Backtrader is not installed")
+    def test_feed_adapter_owns_backtrader_csv_mapping(self):
+        feed = BacktraderFeedAdapter.create_feed("sample.csv")
+        self.assertEqual(feed.p.dataname, "sample.csv")
+        self.assertEqual(feed.p.datetime, 0)
+        self.assertEqual(feed.p.open, 1)
+        self.assertEqual(feed.p.high, 2)
+        self.assertEqual(feed.p.low, 3)
+        self.assertEqual(feed.p.close, 4)
+        self.assertEqual(feed.p.volume, 5)
+        self.assertEqual(feed.p.openinterest, -1)
 
     def test_adapter_does_not_modify_source_data(self):
         data = self.make_data()

@@ -331,6 +331,7 @@ class BacktestContractTests(unittest.TestCase):
         s.total_commission = 0.0
         s.closed_trades = 0
         s.total_contracts = 0
+        s.market.observe(s._bar_adapter.to_bar(s.data))
         s._open_virtual_position(1, 5, 10)
         self.assertEqual(s.virtual_position_size, 5)
         self.assertEqual(s.virtual_entry_price, 100.0)
@@ -366,6 +367,7 @@ class BacktestContractTests(unittest.TestCase):
             sl=98.0,
             tp=102.0,
         )
+        s.market.observe(s._bar_adapter.to_bar(s.data))
         s._close_virtual_position("TAKE_PROFIT", 101.98, 102.0, 11, 2)
         s._check_trade_lifecycle()
         s._check_negative_cash()
@@ -582,6 +584,7 @@ class BacktestContractTests(unittest.TestCase):
             seen.append((start_price, end_price))
             return False
         s._process_monotonic_segment = spy
+        s.market.observe(s._bar_adapter.to_bar(s.data))
         s._process_open_position_bar(7)
         self.assertEqual(seen, [(100.0, 99.0), (99.0, 103.0), (103.0, 100.0)])
         s._process_monotonic_segment = original

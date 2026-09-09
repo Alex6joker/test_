@@ -75,7 +75,7 @@ class BacktestAccountingMixin:
 
     def _unrealized_pnl(self, mark_price: float | None = None) -> float:
         if mark_price is None:
-            mark_price = float(self.data.close[0])
+            mark_price = self.market.current_bar.close
         return self._ensure_accounting_engine().unrealized_pnl(mark_price)
 
     def _log_virtual_portfolio(self, bar_index: int):
@@ -85,13 +85,13 @@ class BacktestAccountingMixin:
             self.logger.debug_event(
                 "PORTFOLIO_STATE",
                 bar_index=bar_index,
-                datetime=self.data.datetime.datetime(0),
+                datetime=self.market.current_bar.datetime,
                 cash=self.state.virtual_cash,
                 unrealized_pnl=unrealized,
                 portfolio_value=equity,
                 position_size=self.state.virtual_position_size,
                 position_price=self.state.virtual_entry_price,
-                mark_price=float(self.data.close[0]),
+                mark_price=self.market.current_bar.close,
                 trade_id=self.state.trade_id,
             )
 
@@ -161,7 +161,8 @@ class BacktestAccountingMixin:
             )
 
     def stop(self):
-        final_close = float(self.data.close[0]) if len(self.data) else None
+        final_bar = self.market.current_bar
+        final_close = final_bar.close if final_bar is not None else None
         unrealized = self._unrealized_pnl(final_close)
 
         self.state.virtual_cash = self._money(self.state.virtual_cash)
@@ -193,8 +194,8 @@ class BacktestAccountingMixin:
         if self.logger.wants_event("BACKTEST_STOP"):
             self.logger.event(
                 "BACKTEST_STOP",
-                bar_index=len(self.data),
-                datetime=self.data.datetime.datetime(0) if len(self.data) else None,
+                bar_index=self.market.bar_index,
+                datetime=self.market.current_bar.datetime if self.market.current_bar else None,
                 position_size=self.state.virtual_position_size,
                 entry_price=self.state.virtual_entry_price,
                 tp_level=self.state.tp_level,

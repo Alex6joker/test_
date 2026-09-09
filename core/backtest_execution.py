@@ -413,15 +413,7 @@ class BacktestExecutionMixin:
         market = getattr(self, "market", None)
         bar = market.current_bar if market is not None else None
         if bar is None:
-            data = self.data
-            bar = Bar(
-                datetime=data.datetime.datetime(0),
-                open=float(data.open[0]),
-                high=float(data.high[0]),
-                low=float(data.low[0]),
-                close=float(data.close[0]),
-                volume=int(data.volume[0]),
-            )
+            raise RuntimeError("Market.current_bar is required to process a position bar")
         return self._get_execution_engine().process_bar(
             context=self._get_execution_context(),
             bar=bar,

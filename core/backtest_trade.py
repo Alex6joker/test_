@@ -151,7 +151,7 @@ class BacktestTradeMixin:
                 f"EXIT_EXECUTED trade_id = {self.state.trade_id}; reason = {reason}; "
                 f"execution_model = VIRTUAL_INTRABAR; broker_executed_price = None; "
                 f"execution_price = {exit_price}; target_exec_price = {exit_price}; "
-                f"exit_slippage = {self.get_backtest_dynamic_slippage(size)}; "
+                f"exit_slippage = {self._execution_engine.get_backtest_dynamic_slippage(size)}; "
                 f"executed_size = {size}; exit_commission = {exit_commission}"
             )
         if self.logger.wants_trade():

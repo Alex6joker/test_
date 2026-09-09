@@ -133,7 +133,11 @@ class BacktestSignalMixin:
             )
 
         if self.state.virtual_position_size:
-            self._process_open_position_bar(current_bar_index)
+            self._execution_engine.process_bar(
+                context=self._execution_context,
+                bar=current_bar,
+                bar_index=current_bar_index,
+            )
             return
 
         selected_signal = (
@@ -173,4 +177,8 @@ class BacktestSignalMixin:
 
         # Entry occurs at current Open, so the position must be exposed to
         # the remainder of the same candle.
-        self._process_open_position_bar(current_bar_index)
+        self._execution_engine.process_bar(
+            context=self._execution_context,
+            bar=current_bar,
+            bar_index=current_bar_index,
+        )

@@ -15,7 +15,7 @@ from core.backtest_adapter import BacktraderBarAdapter
 from core.backtest_market import Market
 from core.backtest_bar import Bar as MarketBar
 from core.backtest_commission import BacktestCommissionMixin
-from core.backtest_execution import BacktestExecutionMixin
+from core.backtest_execution import BacktestExecutionMixin, BacktestExecutionContext, ExecutionEngine
 from core.backtest_numeric import BacktestNumericMixin
 from core.backtest_signal import BacktestSignalMixin
 from core.backtest_state import BacktestState
@@ -250,6 +250,8 @@ class VirtualStrategyContract(
         self.market = Market()
         self._bar_adapter = BacktraderBarAdapter()
         self.state = BacktestState()
+        self._execution_engine = ExecutionEngine()
+        self._execution_context = BacktestExecutionContext(self)
 
         self.trade_id = 1
         self.last_trade_bar = -1

@@ -28,7 +28,7 @@ from core.backtest_execution import (
 )
 from core.backtest_logger import BacktestLogger
 from core.backtest_numeric import BacktestNumericMixin
-from core.backtest_signal import BacktestSignalMixin
+from core.backtest_signal import BacktestSignalMixin, SignalEngine
 from core.backtest_state import BacktestState
 from core.backtest_trade import BacktestTradeMixin
 from core.backtest_trailing import BacktestTrailingMixin
@@ -73,6 +73,7 @@ class RealisticFuturesStrategy(
         self._bar_adapter = BacktraderBarAdapter()
         self._execution_engine = ExecutionEngine()
         self._execution_context = BacktestExecutionContext(self)
+        self._signal_engine = SignalEngine(self.params, self.logger, self._price)
 
         # BacktestState is the single owner of mutable virtual-backtest state.
         # Deliberately no ATR indicator:

@@ -4,17 +4,17 @@ from __future__ import annotations
 class AccountingEngine:
     """Money, P&L and portfolio accounting for the virtual backtest."""
 
-    def __init__(self, state, params, money_fn, commission_per_side_fn) -> None:
+    def __init__(self, state, params, money_fn, commission_per_side: float) -> None:
         self.state = state
         self.params = params
         self._money = money_fn
-        self._commission_per_side = commission_per_side_fn
+        self._commission_per_side = float(commission_per_side)
 
     def entry_commission(self, size: int) -> float:
-        return self._money(self._commission_per_side() * size)
+        return self._money(self._commission_per_side * size)
 
     def exit_commission(self, size: int) -> float:
-        return self._money(self._commission_per_side() * size)
+        return self._money(self._commission_per_side * size)
 
     def apply_entry(self, commission: float) -> None:
         self.state.virtual_cash = self._money(self.state.virtual_cash - commission)
@@ -69,7 +69,7 @@ class BacktestAccountingMixin:
                 self.state,
                 self.params,
                 self._money,
-                self._get_commission_per_side,
+                self.params.real_commission_per_side,
             )
         return self._accounting_engine
 

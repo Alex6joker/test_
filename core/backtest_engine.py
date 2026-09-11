@@ -20,8 +20,6 @@ import backtrader as bt
 from core.backtest_accounting import BacktestAccountingMixin
 from core.backtest_adapter import BacktraderBarAdapter
 from core.backtest_market import Market
-from core.backtest_commission import BacktestCommissionMixin
-from core.backtest_compat import ContractVolumeAnalyzer, PreviousBarRange
 from core.backtest_execution import (
     BacktestExecutionContext,
     ExecutionEngine,
@@ -40,7 +38,6 @@ class RealisticFuturesStrategy(
     BacktestTrailingMixin,
     BacktestTradeMixin,
     BacktestAccountingMixin,
-    BacktestCommissionMixin,
     bt.Strategy,
 ):
     """Virtual intrabar futures backtester."""
@@ -60,6 +57,7 @@ class RealisticFuturesStrategy(
         ("dynamic_trail_steps", []),
         ("logger", None),
         ("initial_cash", 0.0),
+        ("real_commission_per_side", 0.0),
     )
     def __init__(self):
         self.logger = self.params.logger or BacktestLogger()

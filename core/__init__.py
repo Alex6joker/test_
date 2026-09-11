@@ -21,7 +21,8 @@ except ImportError:
 # 3. Чистый экспорт интерфейса ядра наружу.
 # Теперь внешние скрипты (main.py, backtester.py, optimize.py) могут импортировать
 # компоненты напрямую: "from core import RealisticFuturesStrategy"
-from core.backtest_engine import RealisticFuturesStrategy, ContractVolumeAnalyzer
+from core.backtest_engine import RealisticFuturesStrategy
+from core.backtest_compat import ContractVolumeAnalyzer
 
 # Явно объявляем публичный интерфейс пакета
 __all__ = [

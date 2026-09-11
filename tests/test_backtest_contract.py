@@ -14,7 +14,6 @@ from core.backtest_accounting import BacktestAccountingMixin
 from core.backtest_adapter import BacktraderBarAdapter
 from core.backtest_market import Market
 from core.backtest_bar import Bar as MarketBar
-from core.backtest_commission import BacktestCommissionMixin
 from core.backtest_execution import BacktestExecutionMixin, BacktestExecutionContext, ExecutionEngine
 from core.backtest_numeric import BacktestNumericMixin
 from core.backtest_signal import BacktestSignalMixin
@@ -59,6 +58,7 @@ class Params:
     precision_money: int = 2
     dynamic_trail_steps: list[tuple[float, float]] = None
     initial_cash: float = 264000.0
+    real_commission_per_side: float = 10.185
 
     def __post_init__(self):
         if self.dynamic_trail_steps is None:
@@ -103,18 +103,6 @@ class DummyData:
         self.datetime = DateLine()
 
 
-class DummyCommissionInfo:
-    class P:
-        commission = 10.185
-
-    p = P()
-
-
-class DummyBroker:
-    def getcommissioninfo(self, _data):
-        return DummyCommissionInfo()
-
-
 class MultiLine:
     def __init__(self, values, current_index=0):
         self.values = list(values)
@@ -148,7 +136,6 @@ class VirtualStrategyContract(
     BacktestTrailingMixin,
     BacktestTradeMixin,
     BacktestAccountingMixin,
-    BacktestCommissionMixin,
     BacktestSignalMixin,
 ):
     # Test-only compatibility facade. Production mixins access state directly.
@@ -246,7 +233,6 @@ class VirtualStrategyContract(
         self.params = Params()
         self.logger = DummyLogger()
         self.data = DummyData(bar)
-        self.broker = DummyBroker()
         self.market = Market()
         self._bar_adapter = BacktraderBarAdapter()
         self.state = BacktestState()

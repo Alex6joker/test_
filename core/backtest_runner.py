@@ -32,14 +32,14 @@ def run_backtest(
         dynamic_trail_steps=cfg.DYNAMIC_TRAIL_STEPS,
         logger=logger,
         initial_cash=cfg.INITIAL_CASH,
+        real_commission_per_side=cfg.REAL_COMMISSION / 2,
     )
 
     data = BacktraderFeedAdapter.create_feed(processed_path)
     cerebro.adddata(data)
 
     # Backtrader's broker is deliberately not the source of fills/P&L.
-    # Its commission configuration exists only so the strategy can read
-    # the same per-side commission value.
+    # Commission is supplied directly to the virtual accounting model.
     cerebro.broker.setcash(cfg.INITIAL_CASH)
     cerebro.broker.setcommission(
         commission=cfg.REAL_COMMISSION / 2,

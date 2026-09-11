@@ -72,6 +72,8 @@ class RealisticFuturesStrategy(
         self._execution_engine = ExecutionEngine()
         self._execution_context = BacktestExecutionContext(self)
         self._signal_engine = SignalEngine(self.params, self.logger, self._price)
+        from core.backtest_loop import BacktestEngine
+        self._backtest_engine = BacktestEngine(self)
 
         # BacktestState is the single owner of mutable virtual-backtest state.
         # Deliberately no ATR indicator:

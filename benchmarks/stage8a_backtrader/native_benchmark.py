@@ -146,81 +146,11 @@ class NativeBacktestContext:
         self._execution_engine = self._host._execution_engine
         self._execution_context = self._host._execution_context
         self._signal_engine = self._host._signal_engine
+        from core.backtest_loop import BacktestEngine
+        self._backtest_engine = BacktestEngine(self._host)
 
     def process_bar(self, bar) -> None:
-        self.market.observe(bar)
-        current_bar_index = self.market.bar_index
-
-        if self.logger.wants_debug_event("BAR"):
-            self.logger.debug_event(
-                "BAR",
-                bar_index=current_bar_index,
-                datetime=bar.datetime,
-                open=bar.open,
-                high=bar.high,
-                low=bar.low,
-                close=bar.close,
-                volume=bar.volume,
-                position_size=self.state.virtual_position_size,
-                entry_price=self.state.virtual_entry_price,
-                tp_level=self.state.tp_level,
-                sl_level=self.state.sl_level,
-                current_trail_step=self.state.current_trail_step,
-            )
-
-        if self.logger.wants_debug_event("PORTFOLIO_STATE"):
-            self._host._log_virtual_portfolio(current_bar_index)
-
-        if current_bar_index < 2:
-            if self.logger.wants_debug_event("SIGNAL_EVALUATION_SKIPPED"):
-                self.logger.debug_event(
-                    "SIGNAL_EVALUATION_SKIPPED",
-                    bar_index=current_bar_index,
-                    reason="NO_PREVIOUS_AVAILABLE_BAR",
-                )
-            return
-
-        previous_bar = self.market.previous_bar
-        if previous_bar is None:
-            raise RuntimeError("Market.previous_bar is required for signal evaluation")
-
-        intent = self._signal_engine.evaluate(
-            current_bar=bar,
-            previous_bar=previous_bar,
-            bar_index=current_bar_index,
-            position_size=self.state.virtual_position_size,
-            virtual_cash=self.state.virtual_cash,
-        )
-
-        if self.state.virtual_position_size:
-            self._execution_engine.process_bar(
-                context=self._execution_context,
-                bar=bar,
-                bar_index=current_bar_index,
-            )
-            return
-
-        if intent is None:
-            return
-
-        if intent.size < 1:
-            if self.logger.wants_warning_or_error():
-                self.logger.warning(
-                    f"ENTRY_SKIPPED bar_index = {current_bar_index}; "
-                    f"reason = POSITION_SIZE_ZERO; signal = {intent.direction}"
-                )
-            return
-
-        self._host._open_virtual_position(
-            signal=intent.direction,
-            size=intent.size,
-            bar_index=intent.signal_bar_index,
-        )
-        self._execution_engine.process_bar(
-            context=self._execution_context,
-            bar=bar,
-            bar_index=current_bar_index,
-        )
+        self._backtest_engine.process_bar(bar)
 
     @property
     def logger(self):

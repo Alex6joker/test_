@@ -163,7 +163,7 @@ class SignalEngine:
 
 
 class BacktestSignalMixin:
-    """Backtrader orchestration around the virtual SignalEngine."""
+    """Backtrader compatibility facade around the common backtest loop."""
 
     def _calculate_position_size(self, bar_index: int) -> int:
         """Compatibility facade for existing contract tests."""
@@ -178,84 +178,12 @@ class BacktestSignalMixin:
             bar_index=bar_index,
         )
 
-    """Backtrader orchestration around the pure virtual SignalEngine."""
-
     def next(self):
-        current_bar = self._bar_adapter.to_bar(self.data)
-        self.market.observe(current_bar)
-        current_bar_index = self.market.bar_index
-
-        if self.logger.wants_debug_event("BAR"):
-            self.logger.debug_event(
-                "BAR",
-                bar_index=current_bar_index,
-                datetime=current_bar.datetime,
-                open=current_bar.open,
-                high=current_bar.high,
-                low=current_bar.low,
-                close=current_bar.close,
-                volume=current_bar.volume,
-                position_size=self.state.virtual_position_size,
-                entry_price=self.state.virtual_entry_price,
-                tp_level=self.state.tp_level,
-                sl_level=self.state.sl_level,
-                current_trail_step=self.state.current_trail_step,
-            )
-
-        if self.logger.wants_debug_event("PORTFOLIO_STATE"):
-            self._log_virtual_portfolio(current_bar_index)
-
-        if current_bar_index < 2:
-            if self.logger.wants_debug_event("SIGNAL_EVALUATION_SKIPPED"):
-                self.logger.debug_event(
-                    "SIGNAL_EVALUATION_SKIPPED",
-                    bar_index=current_bar_index,
-                    reason="NO_PREVIOUS_AVAILABLE_BAR",
-                )
-            return
-
-        previous_bar = self.market.previous_bar
-        if previous_bar is None:
-            raise RuntimeError("Market.previous_bar is required for signal evaluation")
-
+        """Convert the Backtrader observation to Bar and enter the common loop."""
         if not hasattr(self, "_signal_engine"):
             self._signal_engine = SignalEngine(self.params, self.logger, self._price)
-
-        intent = self._signal_engine.evaluate(
-            current_bar=current_bar,
-            previous_bar=previous_bar,
-            bar_index=current_bar_index,
-            position_size=self.state.virtual_position_size,
-            virtual_cash=self.state.virtual_cash,
-        )
-
-        if self.state.virtual_position_size:
-            self._execution_engine.process_bar(
-                context=self._execution_context,
-                bar=current_bar,
-                bar_index=current_bar_index,
-            )
-            return
-
-        if intent is None:
-            return
-
-        if intent.size < 1:
-            if self.logger.wants_warning_or_error():
-                self.logger.warning(
-                    f"ENTRY_SKIPPED bar_index = {current_bar_index}; "
-                    f"reason = POSITION_SIZE_ZERO; signal = {intent.direction}"
-                )
-            return
-
-        self._open_virtual_position(
-            signal=intent.direction,
-            size=intent.size,
-            bar_index=intent.signal_bar_index,
-        )
-
-        self._execution_engine.process_bar(
-            context=self._execution_context,
-            bar=current_bar,
-            bar_index=current_bar_index,
-        )
+        if not hasattr(self, "_backtest_engine"):
+            from core.backtest_loop import BacktestEngine
+            self._backtest_engine = BacktestEngine(self)
+        current_bar = self._bar_adapter.to_bar(self.data)
+        self._backtest_engine.process_bar(current_bar)

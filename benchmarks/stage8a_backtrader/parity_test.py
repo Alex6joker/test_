@@ -206,13 +206,6 @@ def run_backtrader(cfg, processed_path, log_path):
     )
     cerebro.adddata(BacktraderFeedAdapter.create_feed(processed_path))
     cerebro.broker.setcash(cfg.INITIAL_CASH)
-    cerebro.broker.setcommission(
-        commission=cfg.REAL_COMMISSION / 2,
-        margin=cfg.REAL_MARGIN,
-        mult=cfg.REAL_MULT,
-        stocklike=False,
-        commtype=bt.CommInfoBase.COMM_FIXED,
-    )
     try:
         strategies = cerebro.run()
     finally:

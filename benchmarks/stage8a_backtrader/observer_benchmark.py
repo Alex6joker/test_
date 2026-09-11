@@ -77,13 +77,6 @@ def run_variant(cfg, processed_path: str, stdstats: bool):
     )
     cerebro.adddata(BacktraderFeedAdapter.create_feed(processed_path))
     cerebro.broker.setcash(cfg.INITIAL_CASH)
-    cerebro.broker.setcommission(
-        commission=cfg.REAL_COMMISSION / 2,
-        margin=cfg.REAL_MARGIN,
-        mult=cfg.REAL_MULT,
-        stocklike=False,
-        commtype=bt.CommInfoBase.COMM_FIXED,
-    )
 
     wall_start = time.perf_counter()
     cpu_start = time.process_time()

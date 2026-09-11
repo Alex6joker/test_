@@ -41,13 +41,6 @@ def run_backtest(
     # Backtrader's broker is deliberately not the source of fills/P&L.
     # Commission is supplied directly to the virtual accounting model.
     cerebro.broker.setcash(cfg.INITIAL_CASH)
-    cerebro.broker.setcommission(
-        commission=cfg.REAL_COMMISSION / 2,
-        margin=cfg.REAL_MARGIN,
-        mult=cfg.REAL_MULT,
-        stocklike=False,
-        commtype=bt.CommInfoBase.COMM_FIXED,
-    )
 
     if logger.wants_event("BROKER_START"):
         logger.event(

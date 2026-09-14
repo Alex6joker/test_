@@ -287,6 +287,11 @@ class ExecutionEngine:
                 if result is False:
                     result = None
 
+            # The segment may close the virtual position.  Diagnostics after
+            # segment processing must report the current state, not the size
+            # captured before the segment started.
+            position_size = context.position_size
+
             if debug_enabled:
                 context.debug_event(
                     "TRAIL_EVALUATION",

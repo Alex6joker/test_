@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import os
-import uuid
 
-from core.backtest_data import export_backtrader_adapter, load_and_prepare_backtest_dataframe
+from core.backtest_data import load_and_prepare_backtest_dataframe
 from core.backtest_logger import BacktestLogger
 from core.backtest_result import BacktestResult
-from core.backtest_runner import run_backtest
+from core.backtest_native import run_native_backtest
 from core.backtest_validation import validate_backtest_dataframe
 
 
@@ -32,9 +31,6 @@ def run_instrument_backtest(instrument_folder, cfg, log_mode="DIAGNOSTIC"):
         instrument_folder,
         cfg.TEST_OPTIMIZE_CSV_PATH_4MONTH_PATH,
     )
-
-    unique_id = uuid.uuid4().hex[:8]
-    processed_path = f"temp_bt_ready_{unique_id}.csv"
 
     precision_money = getattr(
         cfg,
@@ -76,12 +72,10 @@ def run_instrument_backtest(instrument_folder, cfg, log_mode="DIAGNOSTIC"):
         prepared = load_and_prepare_backtest_dataframe(csv_path)
         validate_backtest_dataframe(prepared, logger)
 
-        # This is only a temporary adapter for Backtrader. The source CSV is
-        # never sorted, filled, or otherwise modified.
-        export_backtrader_adapter(prepared, processed_path)
-
-        result = run_backtest(
-            processed_path=processed_path,
+        # Production path: use the framework-independent virtual execution
+        # model directly. The source CSV is never sorted, filled, or modified.
+        result = run_native_backtest(
+            prepared=prepared,
             cfg=cfg,
             logger=logger,
             precision_money=precision_money,
@@ -95,7 +89,5 @@ def run_instrument_backtest(instrument_folder, cfg, log_mode="DIAGNOSTIC"):
             )
         raise
     finally:
-        if os.path.exists(processed_path):
-            os.remove(processed_path)
         logger.section("BACKTEST END")
         logger.close()

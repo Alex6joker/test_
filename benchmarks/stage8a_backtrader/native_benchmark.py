@@ -174,14 +174,14 @@ class NativeBacktestContext:
 
 def bars_from_dataframe(prepared):
     from core.backtest_bar import Bar
-    for row in prepared.itertuples(index=False):
+    for row in prepared.itertuples(index=False, name=None):
         yield Bar(
-            datetime=row.DATETIME.to_pydatetime(),
-            open=float(row.OPEN),
-            high=float(row.HIGH),
-            low=float(row.LOW),
-            close=float(row.CLOSE),
-            volume=int(round(float(row.VOLUME))),
+            datetime=row[0].to_pydatetime(),
+            open=float(row[1]),
+            high=float(row[2]),
+            low=float(row[3]),
+            close=float(row[4]),
+            volume=int(round(float(row[5]))),
         )
 
 

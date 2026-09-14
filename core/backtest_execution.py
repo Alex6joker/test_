@@ -99,8 +99,10 @@ class ExecutionEngine:
         bar_index: int,
         phase_index: int,
         prices_normalized: bool = False,
+        position_size: int | None = None,
     ) -> ExecutionResult | None:
-        position_size = context.position_size
+        if position_size is None:
+            position_size = context.position_size
         if not position_size:
             return None
 
@@ -239,9 +241,10 @@ class ExecutionEngine:
             points = [b_open, b_high, b_low, b_close]
 
         debug_enabled = context.debug_enabled
+        position_size = context.position_size
 
         for phase_index in range(len(points) - 1):
-            if not context.position_size:
+            if not position_size:
                 break
 
             start_price = points[phase_index]
@@ -272,6 +275,7 @@ class ExecutionEngine:
                     bar_index=bar_index,
                     phase_index=phase_index,
                     prices_normalized=True,
+                    position_size=position_size,
                 )
             else:
                 result = segment_processor(
@@ -289,7 +293,7 @@ class ExecutionEngine:
                     trade_id=context.trade_id,
                     bar_index=bar_index,
                     phase_index=phase_index,
-                    position_size=context.position_size,
+                    position_size=position_size,
                     start_price=start_price,
                     end_price=end_price,
                     entry_price=context.entry_price,
@@ -304,7 +308,7 @@ class ExecutionEngine:
                     trade_id=context.trade_id,
                     bar_index=bar_index,
                     phase_index=phase_index,
-                    position_size=context.position_size,
+                    position_size=position_size,
                     start_price=start_price,
                     end_price=end_price,
                     tp_level=context.tp_level,

@@ -95,12 +95,17 @@ class ExecutionEngine:
         end_price: float,
         bar_index: int,
         phase_index: int,
+        prices_normalized: bool = False,
     ) -> ExecutionResult | None:
         if not context.position_size:
             return None
 
-        start = context.price(start_price)
-        end = context.price(end_price)
+        if prices_normalized:
+            start = start_price
+            end = end_price
+        else:
+            start = context.price(start_price)
+            end = context.price(end_price)
         if start == end:
             return None
 
@@ -256,6 +261,7 @@ class ExecutionEngine:
                     end_price=end_price,
                     bar_index=bar_index,
                     phase_index=phase_index,
+                    prices_normalized=True,
                 )
             else:
                 result = segment_processor(

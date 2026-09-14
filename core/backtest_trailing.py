@@ -5,28 +5,40 @@ class BacktestTrailingMixin:
     """Dynamic trailing-stop calculations and updates."""
 
     def _trail_trigger_levels(self, direction: int):
-        tp_distance = self._price(self.params.tp)
         entry = self.state.virtual_entry_price
         if entry is None:
             return []
 
-        result = []
-        for step_idx, (trigger_pct, stop_pct) in enumerate(
-            self.params.dynamic_trail_steps
-        ):
-            if step_idx <= self.state.current_trail_step:
-                continue
+        direction = 1 if direction > 0 else -1
+        cache_entry = getattr(self, "_trail_levels_cache_entry", None)
+        cache_direction = getattr(self, "_trail_levels_cache_direction", None)
+        levels = getattr(self, "_trail_levels_cache", None)
 
-            trigger_distance = self._price(tp_distance * trigger_pct)
-            if direction > 0:
-                trigger_price = self._price(entry + trigger_distance)
-                new_sl = self._price(entry + tp_distance * stop_pct)
-            else:
-                trigger_price = self._price(entry - trigger_distance)
-                new_sl = self._price(entry - tp_distance * stop_pct)
+        if cache_entry != entry or cache_direction != direction or levels is None:
+            tp_distance = self._price(self.params.tp)
+            levels = []
 
-            result.append((step_idx, trigger_price, new_sl))
-        return result
+            for step_idx, (trigger_pct, stop_pct) in enumerate(
+                self.params.dynamic_trail_steps
+            ):
+                trigger_distance = self._price(tp_distance * trigger_pct)
+                if direction > 0:
+                    trigger_price = self._price(entry + trigger_distance)
+                    new_sl = self._price(entry + tp_distance * stop_pct)
+                else:
+                    trigger_price = self._price(entry - trigger_distance)
+                    new_sl = self._price(entry - tp_distance * stop_pct)
+
+                levels.append((step_idx, trigger_price, new_sl))
+
+            self._trail_levels_cache_entry = entry
+            self._trail_levels_cache_direction = direction
+            self._trail_levels_cache = levels
+
+        current_step = self.state.current_trail_step
+        if current_step < 0:
+            return levels.copy()
+        return levels[current_step + 1 :].copy()
 
     def _apply_trail_step(self, step_idx: int, new_sl: float, current_price: float):
         old_sl = self.state.sl_level

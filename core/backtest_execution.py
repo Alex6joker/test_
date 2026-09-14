@@ -100,7 +100,8 @@ class ExecutionEngine:
         phase_index: int,
         prices_normalized: bool = False,
     ) -> ExecutionResult | None:
-        if not context.position_size:
+        position_size = context.position_size
+        if not position_size:
             return None
 
         if prices_normalized:
@@ -112,7 +113,7 @@ class ExecutionEngine:
         if start == end:
             return None
 
-        direction = 1 if context.position_size > 0 else -1
+        direction = 1 if position_size > 0 else -1
         moving_up = end > start
         favorable = (direction > 0 and moving_up) or (direction < 0 and not moving_up)
 
@@ -125,22 +126,25 @@ class ExecutionEngine:
                 elif direction < 0 and end <= trigger_price < start:
                     events.append(("TRAIL", trigger_price, step_idx, new_sl))
 
+        sl_level = context.sl_level
+        tp_level = context.tp_level
+
         if direction > 0:
-            if not moving_up and end <= context.sl_level < start:
-                events.append(("STOP_LOSS", context.sl_level, None, None))
-            elif moving_up and start <= context.sl_level <= end:
-                events.append(("STOP_LOSS", context.sl_level, None, None))
+            if not moving_up and end <= sl_level < start:
+                events.append(("STOP_LOSS", sl_level, None, None))
+            elif moving_up and start <= sl_level <= end:
+                events.append(("STOP_LOSS", sl_level, None, None))
 
-            if moving_up and start <= context.tp_level <= end:
-                events.append(("TAKE_PROFIT", context.tp_level, None, None))
+            if moving_up and start <= tp_level <= end:
+                events.append(("TAKE_PROFIT", tp_level, None, None))
         else:
-            if moving_up and start <= context.sl_level <= end:
-                events.append(("STOP_LOSS", context.sl_level, None, None))
-            elif not moving_up and end <= context.sl_level <= start:
-                events.append(("STOP_LOSS", context.sl_level, None, None))
+            if moving_up and start <= sl_level <= end:
+                events.append(("STOP_LOSS", sl_level, None, None))
+            elif not moving_up and end <= sl_level <= start:
+                events.append(("STOP_LOSS", sl_level, None, None))
 
-            if not moving_up and end <= context.tp_level <= start:
-                events.append(("TAKE_PROFIT", context.tp_level, None, None))
+            if not moving_up and end <= tp_level <= start:
+                events.append(("TAKE_PROFIT", tp_level, None, None))
 
         if moving_up:
             events.sort(key=lambda e: (e[1], 0 if e[0] != "TRAIL" else 1))
@@ -149,7 +153,7 @@ class ExecutionEngine:
 
         current_price = start
         for event_type, event_price, step_idx, new_sl in events:
-            if not context.position_size:
+            if not position_size:
                 return None
 
             if moving_up and event_price < current_price:
@@ -161,23 +165,24 @@ class ExecutionEngine:
 
             if event_type == "TRAIL":
                 context.apply_trail_step(step_idx, new_sl, current_price)
+                sl_level = context.sl_level
                 continue
 
-            size = abs(context.position_size)
+            size = abs(position_size)
             slippage = context.dynamic_slippage(size)
 
             if event_type == "STOP_LOSS":
                 detected_price = current_price
-                if context.position_size > 0:
-                    target_exec_price = context.price(context.sl_level - slippage)
+                if position_size > 0:
+                    target_exec_price = context.price(sl_level - slippage)
                 else:
-                    target_exec_price = context.price(context.sl_level + slippage)
+                    target_exec_price = context.price(sl_level + slippage)
             else:
                 detected_price = current_price
-                if context.position_size > 0:
-                    target_exec_price = context.price(context.tp_level - slippage)
+                if position_size > 0:
+                    target_exec_price = context.price(tp_level - slippage)
                 else:
-                    target_exec_price = context.price(context.tp_level + slippage)
+                    target_exec_price = context.price(tp_level + slippage)
 
             if context.wants_debug_event("EXIT_CROSSING"):
                 context.debug_event(
@@ -187,8 +192,8 @@ class ExecutionEngine:
                     phase_index=phase_index,
                     event_type=event_type,
                     crossing_price=current_price,
-                    sl_level=context.sl_level,
-                    tp_level=context.tp_level,
+                    sl_level=sl_level,
+                    tp_level=tp_level,
                     slippage=slippage,
                 )
 

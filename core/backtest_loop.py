@@ -36,11 +36,12 @@ class BacktestEngine:
         market = runtime.market
         state = runtime.state
         logger = runtime.logger
+        debug_enabled = getattr(logger, "is_diagnostic", logger.wants_debug_event("BAR"))
 
         market.observe(bar)
         current_bar_index = market.bar_index
 
-        if logger.wants_debug_event("BAR"):
+        if debug_enabled:
             logger.debug_event(
                 "BAR",
                 bar_index=current_bar_index,
@@ -57,11 +58,11 @@ class BacktestEngine:
                 current_trail_step=state.current_trail_step,
             )
 
-        if logger.wants_debug_event("PORTFOLIO_STATE"):
+        if debug_enabled:
             runtime._log_virtual_portfolio(current_bar_index)
 
         if current_bar_index < 2:
-            if logger.wants_debug_event("SIGNAL_EVALUATION_SKIPPED"):
+            if debug_enabled:
                 logger.debug_event(
                     "SIGNAL_EVALUATION_SKIPPED",
                     bar_index=current_bar_index,

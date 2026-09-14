@@ -55,6 +55,9 @@ class ExecutionContext(Protocol):
 
     def dynamic_slippage(self, size: int) -> float: ...
 
+    @property
+    def debug_enabled(self) -> bool: ...
+
     def wants_debug_event(self, event_name: str) -> bool: ...
 
     def debug_event(self, event_name: str, **kwargs) -> None: ...
@@ -230,6 +233,8 @@ class ExecutionEngine:
         else:
             points = [b_open, b_high, b_low, b_close]
 
+        debug_enabled = context.debug_enabled
+
         for phase_index in range(len(points) - 1):
             if not context.position_size:
                 break
@@ -237,7 +242,7 @@ class ExecutionEngine:
             start_price = points[phase_index]
             end_price = points[phase_index + 1]
 
-            if context.wants_debug_event("INTRABAR_PHASE"):
+            if debug_enabled:
                 context.debug_event(
                     "INTRABAR_PHASE",
                     trade_id=context.trade_id,
@@ -273,7 +278,7 @@ class ExecutionEngine:
                 if result is False:
                     result = None
 
-            if context.wants_debug_event("TRAIL_EVALUATION"):
+            if debug_enabled:
                 context.debug_event(
                     "TRAIL_EVALUATION",
                     trade_id=context.trade_id,
@@ -288,7 +293,7 @@ class ExecutionEngine:
                     current_trail_step=context.current_trail_step,
                 )
 
-            if context.wants_debug_event("EXIT_EVALUATION"):
+            if debug_enabled:
                 context.debug_event(
                     "EXIT_EVALUATION",
                     trade_id=context.trade_id,
@@ -349,6 +354,11 @@ class BacktestExecutionContext:
 
     def dynamic_slippage(self, size: int) -> float:
         return ExecutionEngine.get_backtest_dynamic_slippage(size)
+
+    @property
+    def debug_enabled(self) -> bool:
+        logger = self._strategy.logger
+        return getattr(logger, "is_diagnostic", logger.wants_debug_event("BAR"))
 
     def wants_debug_event(self, event_name: str) -> bool:
         return self._strategy.logger.wants_debug_event(event_name)

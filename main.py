@@ -7,8 +7,6 @@ import argparse
 
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 import core
-from core.engine import LiveTradingEngine
-from core.real_engine import RealTradingEngine
 from quik_python import Quik
 
 
@@ -63,6 +61,7 @@ def check_moex_pretrading_allowed() -> bool:
 
 
 async def start_live_robot(cfg):
+    from core.engine import LiveTradingEngine
     if not check_moex_pretrading_allowed():
         return
     engine = LiveTradingEngine(cfg)
@@ -71,6 +70,7 @@ async def start_live_robot(cfg):
 
 
 async def start_real_robot(cfg):
+    from core.real_engine import RealTradingEngine
     if not check_moex_pretrading_allowed():
         return
     engine = RealTradingEngine(cfg)

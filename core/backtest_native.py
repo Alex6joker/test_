@@ -126,23 +126,10 @@ def params_from_config(cfg, precision_money: int):
     )
 
 
-def bars_from_dataframe(prepared):
-    """Convert prepared rows directly to immutable Bar objects."""
-    for row in prepared.itertuples(index=False, name=None):
-        yield Bar(
-            datetime=row[0].to_pydatetime(),
-            open=float(row[1]),
-            high=float(row[2]),
-            low=float(row[3]),
-            close=float(row[4]),
-            volume=int(round(float(row[5]))),
-        )
-
-
-def run_native_backtest(prepared, cfg, logger, precision_money: int) -> BacktestResult:
-    """Run the production backtest without a framework/feed/temp CSV."""
+def run_native_backtest(bars, cfg, logger, precision_money: int) -> BacktestResult:
+    """Run the production backtest from an iterable of immutable Bars."""
     params = params_from_config(cfg, precision_money)
     runtime = NativeBacktestRuntime(params, logger)
-    for bar in bars_from_dataframe(prepared):
+    for bar in bars:
         runtime.process_bar(bar)
     return runtime.finish()

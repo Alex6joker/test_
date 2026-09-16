@@ -39,16 +39,16 @@ def main() -> int:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     cfg = load_config()
 
-    from core.backtest_data import export_backtrader_adapter, load_and_prepare_backtest_dataframe
+    from core.backtest_data import export_backtrader_adapter, load_and_prepare_backtest_bars
     from core.backtest_logger import BacktestLogger
     from core.backtest_runner import run_backtest
-    from core.backtest_validation import validate_backtest_dataframe
+    from core.backtest_validation import validate_backtest_bars
 
     source_csv = PROJECT_ROOT / "03_BRENT" / cfg.TEST_OPTIMIZE_CSV_PATH_4MONTH_PATH
-    prepared = load_and_prepare_backtest_dataframe(str(source_csv))
+    bars_data = load_and_prepare_backtest_bars(str(source_csv))
     validation_logger = BacktestLogger(str(RESULTS_DIR / "_profile_validation.log"), reset=True, mode="NONE")
     try:
-        validate_backtest_dataframe(prepared, validation_logger)
+        validate_backtest_bars(bars_data, validation_logger)
     finally:
         validation_logger.close()
 
@@ -65,7 +65,7 @@ def main() -> int:
     os.close(fd)
     logger = None
     try:
-        export_backtrader_adapter(prepared, processed_path)
+        export_backtrader_adapter(bars_data, processed_path)
         logger = BacktestLogger(str(RESULTS_DIR / "_profile_run.log"), reset=True, mode="NONE")
         profiler = cProfile.Profile()
         start = time.perf_counter()
@@ -85,7 +85,7 @@ def main() -> int:
         profiler.dump_stats(str(prof_path))
         with txt_path.open("w", encoding="utf-8") as f:
             f.write(f"profile_timestamp = {timestamp}\n")
-            f.write(f"bars = {len(prepared)}\n")
+            f.write(f"bars = {len(bars_data)}\n")
             f.write(f"wall_seconds = {elapsed:.6f}\n")
             f.write(f"result = {result!r}\n\n")
             stats = pstats.Stats(profiler, stream=f)

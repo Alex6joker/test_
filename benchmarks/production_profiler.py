@@ -38,11 +38,11 @@ def _run_production_path() -> None:
 def _print_targeted_stats(stats: pstats.Stats) -> None:
     """Print the main production-path stages with their cumulative cost."""
     targets = {
-        "load_and_prepare_backtest_dataframe",
-        "validate_backtest_dataframe",
+        "load_and_prepare_backtest_bars",
+        "validate_backtest_bars",
         "run_instrument_backtest",
         "run_native_backtest",
-        "bars_from_dataframe",
+        "run_native_backtest",
         "process_bar",
         "finish",
         "_log_backtest_result",

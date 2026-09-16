@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import os
 
-from core.backtest_data import load_and_prepare_backtest_dataframe
+from core.backtest_data import load_and_prepare_backtest_bars
 from core.backtest_logger import BacktestLogger
 from core.backtest_result import BacktestResult
 from core.backtest_native import run_native_backtest
-from core.backtest_validation import validate_backtest_dataframe
+from core.backtest_validation import validate_backtest_bars
 
 
 def _log_backtest_result(logger: BacktestLogger, result: BacktestResult) -> None:
@@ -69,13 +69,13 @@ def run_instrument_backtest(instrument_folder, cfg, log_mode="DIAGNOSTIC"):
         return
 
     try:
-        prepared = load_and_prepare_backtest_dataframe(csv_path)
-        validate_backtest_dataframe(prepared, logger)
+        bars = load_and_prepare_backtest_bars(csv_path)
+        validate_backtest_bars(bars, logger)
 
         # Production path: use the framework-independent virtual execution
         # model directly. The source CSV is never sorted, filled, or modified.
         result = run_native_backtest(
-            prepared=prepared,
+            bars=bars,
             cfg=cfg,
             logger=logger,
             precision_money=precision_money,

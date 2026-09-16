@@ -145,7 +145,7 @@ def compare_lists(name, expected, actual):
     }
 
 
-def run_native(cfg, prepared, log_path):
+def run_native(cfg, bars, log_path):
     from core.backtest_logger import BacktestLogger
     from core.backtest_bar import Bar
     spec = importlib.util.spec_from_file_location(
@@ -163,17 +163,8 @@ def run_native(cfg, prepared, log_path):
     params = make_params(cfg)
     ctx = NativeBacktestContext(params, logger)
     try:
-        for row in prepared.itertuples(index=False):
-            ctx.process_bar(
-                Bar(
-                    datetime=row.DATETIME.to_pydatetime(),
-                    open=float(row.OPEN),
-                    high=float(row.HIGH),
-                    low=float(row.LOW),
-                    close=float(row.CLOSE),
-                    volume=int(round(float(row.VOLUME))),
-                )
-            )
+        for bar in bars:
+            ctx.process_bar(bar)
         result = ctx.finish()
         records = list(ctx._trade_ledger.records)
     finally:
@@ -226,12 +217,12 @@ def main() -> int:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     cfg = load_config()
 
-    from core.backtest_data import export_backtrader_adapter, load_and_prepare_backtest_dataframe
+    from core.backtest_data import export_backtrader_adapter, load_and_prepare_backtest_bars
     from core.backtest_logger import BacktestLogger
-    from core.backtest_validation import validate_backtest_dataframe
+    from core.backtest_validation import validate_backtest_bars
 
     source_csv = PROJECT_ROOT / "03_BRENT" / cfg.TEST_OPTIMIZE_CSV_PATH_4MONTH_PATH
-    prepared = load_and_prepare_backtest_dataframe(str(source_csv))
+    bars_data = load_and_prepare_backtest_bars(str(source_csv))
 
     validation_logger = BacktestLogger(
         str(RESULTS_DIR / "_stage82_parity_validation.log"),
@@ -239,7 +230,7 @@ def main() -> int:
         mode="NONE",
     )
     try:
-        validate_backtest_dataframe(prepared, validation_logger)
+        validate_backtest_bars(bars_data, validation_logger)
     finally:
         validation_logger.close()
 
@@ -251,10 +242,10 @@ def main() -> int:
     output_path = RESULTS_DIR / args.output
 
     try:
-        export_backtrader_adapter(prepared, processed_path)
+        export_backtrader_adapter(bars_data, processed_path)
 
         bt_result, bt_records = run_backtrader(cfg, processed_path, bt_log)
-        native_result, native_records = run_native(cfg, prepared, native_log)
+        native_result, native_records = run_native(cfg, bars_data, native_log)
 
         checks = {}
 
@@ -295,7 +286,7 @@ def main() -> int:
             "stage": "8.2.1",
             "experiment": "backtrader_off_vs_native_parity",
             "instrument": "BRU6",
-            "bars": int(len(prepared)),
+            "bars": int(len(bars_data)),
             "checks": checks,
             "passed": all_pass,
             "backtrader": {

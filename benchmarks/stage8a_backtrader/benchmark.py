@@ -170,24 +170,24 @@ def main() -> int:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     cfg = load_config()
 
-    from core.backtest_data import export_backtrader_adapter, load_and_prepare_backtest_dataframe
+    from core.backtest_data import export_backtrader_adapter, load_and_prepare_backtest_bars
     from core.backtest_logger import BacktestLogger
-    from core.backtest_validation import validate_backtest_dataframe
+    from core.backtest_validation import validate_backtest_bars
 
     source_csv = PROJECT_ROOT / "03_BRENT" / cfg.TEST_OPTIMIZE_CSV_PATH_4MONTH_PATH
-    prepared = load_and_prepare_backtest_dataframe(str(source_csv))
+    bars_data = load_and_prepare_backtest_bars(str(source_csv))
     validation_logger = BacktestLogger(str(RESULTS_DIR / "_validation.log"), reset=True, mode="NONE")
     try:
-        validate_backtest_dataframe(prepared, validation_logger)
+        validate_backtest_bars(bars_data, validation_logger)
     finally:
         validation_logger.close()
 
-    bars = int(len(prepared))
+    bars = int(len(bars_data))
     fd, processed_path = tempfile.mkstemp(prefix="stage8a1_bt_", suffix=".csv")
     os.close(fd)
 
     try:
-        export_backtrader_adapter(prepared, processed_path)
+        export_backtrader_adapter(bars_data, processed_path)
 
         for mode in args.modes:
             # Warm-up runs are intentionally not saved.

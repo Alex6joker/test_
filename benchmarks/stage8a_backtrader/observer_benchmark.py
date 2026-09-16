@@ -138,9 +138,9 @@ def save_variant(variant, stdstats, run_number, wall, cpu, bars, source_csv, res
 
 def main():
     import argparse
-    from core.backtest_data import export_backtrader_adapter, load_and_prepare_backtest_dataframe
+    from core.backtest_data import export_backtrader_adapter, load_and_prepare_backtest_bars
     from core.backtest_logger import BacktestLogger
-    from core.backtest_validation import validate_backtest_dataframe
+    from core.backtest_validation import validate_backtest_bars
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--warmup', type=int, default=2)
@@ -152,17 +152,17 @@ def main():
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     cfg = load_config()
     source_csv = PROJECT_ROOT / '03_BRENT' / cfg.TEST_OPTIMIZE_CSV_PATH_4MONTH_PATH
-    prepared = load_and_prepare_backtest_dataframe(str(source_csv))
+    bars_data = load_and_prepare_backtest_bars(str(source_csv))
     vlogger = BacktestLogger(str(RESULTS_DIR / '_observer_validation.log'), reset=True, mode='NONE')
     try:
-        validate_backtest_dataframe(prepared, vlogger)
+        validate_backtest_bars(bars_data, vlogger)
     finally:
         vlogger.close()
-    bars = len(prepared)
+    bars = len(bars_data)
     fd, processed_path = tempfile.mkstemp(prefix='stage8a_observers_', suffix='.csv')
     os.close(fd)
     try:
-        export_backtrader_adapter(prepared, processed_path)
+        export_backtrader_adapter(bars_data, processed_path)
         all_samples = {}
         for variant, stdstats in [('ON', True), ('OFF', False)]:
             for _ in range(args.warmup):

@@ -174,20 +174,7 @@ class NativeBacktestContext:
         return result_dict(self.state, self._host.params, self._trade_ledger, final_virtual_equity)
 
 
-def bars_from_dataframe(prepared):
-    from core.backtest_bar import Bar
-    for row in prepared.itertuples(index=False, name=None):
-        yield Bar(
-            datetime=row[0].to_pydatetime(),
-            open=float(row[1]),
-            high=float(row[2]),
-            low=float(row[3]),
-            close=float(row[4]),
-            volume=int(round(float(row[5]))),
-        )
-
-
-def run_native(cfg, prepared):
+def run_native(cfg, bars):
     from core.backtest_logger import BacktestLogger
 
     logger = BacktestLogger(
@@ -197,7 +184,7 @@ def run_native(cfg, prepared):
     params.real_commission_per_side = cfg.REAL_COMMISSION / 2
     ctx = NativeBacktestContext(params, logger)
     try:
-        for bar in bars_from_dataframe(prepared):
+        for bar in bars:
             ctx.process_bar(bar)
         result = ctx.finish()
     finally:
@@ -253,11 +240,11 @@ def run_backtrader_off(cfg, processed_path):
     return result
 
 
-def run_measured(cfg, prepared, processed_path, variant):
+def run_measured(cfg, bars_data, processed_path, variant):
     wall_start = time.perf_counter()
     cpu_start = time.process_time()
     if variant == "NATIVE":
-        result = run_native(cfg, prepared)
+        result = run_native(cfg, bars_data)
     else:
         result = run_backtrader_off(cfg, processed_path)
     return time.perf_counter() - wall_start, time.process_time() - cpu_start, result
@@ -319,35 +306,35 @@ def main() -> int:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     cfg = load_config()
 
-    from core.backtest_data import export_backtrader_adapter, load_and_prepare_backtest_dataframe
+    from core.backtest_data import export_backtrader_adapter, load_and_prepare_backtest_bars
     from core.backtest_logger import BacktestLogger
-    from core.backtest_validation import validate_backtest_dataframe
+    from core.backtest_validation import validate_backtest_bars
 
     source_csv = PROJECT_ROOT / "03_BRENT" / cfg.TEST_OPTIMIZE_CSV_PATH_4MONTH_PATH
-    prepared = load_and_prepare_backtest_dataframe(str(source_csv))
+    bars_data = load_and_prepare_backtest_bars(str(source_csv))
     validation_logger = BacktestLogger(
         str(RESULTS_DIR / "_stage82_validation.log"), reset=True, mode="NONE"
     )
     try:
-        validate_backtest_dataframe(prepared, validation_logger)
+        validate_backtest_bars(bars_data, validation_logger)
     finally:
         validation_logger.close()
 
-    bars = int(len(prepared))
+    bars = int(len(bars_data))
     fd, processed_path = tempfile.mkstemp(prefix="stage82_bt_", suffix=".csv")
     os.close(fd)
     try:
-        export_backtrader_adapter(prepared, processed_path)
+        export_backtrader_adapter(bars_data, processed_path)
 
         all_samples = {}
         for variant in ("BACKTRADER_OFF", "NATIVE"):
             for _ in range(args.warmup):
-                run_measured(cfg, prepared, processed_path, variant)
+                run_measured(cfg, bars_data, processed_path, variant)
 
             samples = []
             for run_number in range(1, args.runs + 1):
                 wall, cpu, result = run_measured(
-                    cfg, prepared, processed_path, variant
+                    cfg, bars_data, processed_path, variant
                 )
                 sample = RunSample(variant, run_number, wall, cpu, result)
                 samples.append(sample)

@@ -47,13 +47,13 @@ def main() -> int:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     cfg = load_config()
 
-    from core.backtest_data import load_and_prepare_backtest_dataframe
+    from core.backtest_data import load_and_prepare_backtest_bars
     from core.backtest_logger import BacktestLogger
-    from core.backtest_validation import validate_backtest_dataframe
+    from core.backtest_validation import validate_backtest_bars
     from benchmarks.stage8a_backtrader.native_benchmark import run_native
 
     source_csv = PROJECT_ROOT / "03_BRENT" / cfg.TEST_OPTIMIZE_CSV_PATH_4MONTH_PATH
-    prepared = load_and_prepare_backtest_dataframe(str(source_csv))
+    bars_data = load_and_prepare_backtest_bars(str(source_csv))
 
     validation_logger = BacktestLogger(
         str(RESULTS_DIR / "_native_profile_validation.log"),
@@ -61,13 +61,13 @@ def main() -> int:
         mode="NONE",
     )
     try:
-        validate_backtest_dataframe(prepared, validation_logger)
+        validate_backtest_bars(bars_data, validation_logger)
     finally:
         validation_logger.close()
 
     # Warmups are intentionally outside the measured profile.
     for _ in range(args.warmup):
-        run_native(cfg, prepared)
+        run_native(cfg, bars_data)
 
     timestamp = datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
     prof_path = RESULTS_DIR / f"native_profile_{timestamp}.prof"
@@ -76,14 +76,14 @@ def main() -> int:
     profiler = cProfile.Profile()
     try:
         profiler.enable()
-        result = run_native(cfg, prepared)
+        result = run_native(cfg, bars_data)
         profiler.disable()
 
         profiler.dump_stats(str(prof_path))
 
         with txt_path.open("w", encoding="utf-8") as report:
             report.write(f"profile_timestamp = {timestamp}\n")
-            report.write(f"bars = {len(prepared)}\n")
+            report.write(f"bars = {len(bars_data)}\n")
             report.write(f"result = {result!r}\n\n")
             report.write("=== cumulative ===\n")
             stats = pstats.Stats(profiler, stream=report)
@@ -101,7 +101,7 @@ def main() -> int:
         stats.sort_stats("cumulative")
         print(f"Profile saved: {prof_path.name}")
         print(f"Profile report saved: {txt_path.name}")
-        print(f"Bars: {len(prepared)}")
+        print(f"Bars: {len(bars_data)}")
         print(f"Result: {result}")
         print("")
         print(f"Top {args.top} functions by cumulative time:")

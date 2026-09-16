@@ -58,7 +58,7 @@ class BacktestTrailingMixin:
         self.state.current_trail_step = step_idx
         if self.logger.wants_trade():
             self.logger.trade(
-                f"TRAIL_UPDATE trade_id = {self.state.trade_id}; "
+                f"TRAIL_UPDATE trade_id = {self._ensure_trade_ledger().trade_id}; "
                 f"step_idx = {step_idx}; "
                 f"trigger_pct = {self.params.dynamic_trail_steps[step_idx][0]}; "
                 f"stop_pct = {self.params.dynamic_trail_steps[step_idx][1]}; "

@@ -351,7 +351,7 @@ class BacktestExecutionContext:
 
     @property
     def trade_id(self) -> int:
-        return self._strategy.state.trade_id
+        return self._strategy._ensure_trade_ledger().trade_id
 
     @property
     def current_trail_step(self) -> int:

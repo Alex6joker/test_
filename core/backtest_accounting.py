@@ -79,6 +79,7 @@ class BacktestAccountingMixin:
         return self._ensure_accounting_engine().unrealized_pnl(mark_price)
 
     def _log_virtual_portfolio(self, bar_index: int):
+        ledger = self._ensure_trade_ledger()
         unrealized = self._unrealized_pnl()
         equity = self._money(self.state.virtual_cash + unrealized)
         if self.logger.wants_debug_event("PORTFOLIO_STATE"):
@@ -92,12 +93,13 @@ class BacktestAccountingMixin:
                 position_size=self.state.virtual_position_size,
                 position_price=self.state.virtual_entry_price,
                 mark_price=self.market.current_bar.close,
-                trade_id=self.state.trade_id,
+                trade_id=ledger.trade_id,
             )
 
     def _check_accounting(self):
+        ledger = self._ensure_trade_ledger()
         closed_net = self._money(
-            sum(float(r["net_pnl"]) for r in self.state.closed_trade_records)
+            sum(float(r["net_pnl"]) for r in ledger.closed_records)
         )
         open_entry_commission = (
             self.state.virtual_entry_commission if self.state.virtual_position_size else 0.0
@@ -132,12 +134,13 @@ class BacktestAccountingMixin:
             )
 
     def _check_trade_lifecycle(self):
-        errors = self._ensure_trade_ledger().check()
+        ledger = self._ensure_trade_ledger()
+        errors = ledger.check(self.state.virtual_position_size)
         if self.logger.wants_event("TRADE_LIFECYCLE_CHECK"):
             self.logger.event(
                 "TRADE_LIFECYCLE_CHECK",
-                trade_count=len(self.state.trade_records),
-                closed_trade_count=self.state.closed_trades,
+                trade_count=len(ledger.records),
+                closed_trade_count=ledger.closed_trades,
                 open_position_size=self.state.virtual_position_size,
                 errors=errors,
                 passed=not errors,
@@ -161,12 +164,13 @@ class BacktestAccountingMixin:
             )
 
     def stop(self):
+        ledger = self._ensure_trade_ledger()
         final_bar = self.market.current_bar
         final_close = final_bar.close if final_bar is not None else None
         unrealized = self._unrealized_pnl(final_close)
 
         self.state.virtual_cash = self._money(self.state.virtual_cash)
-        self.state.final_virtual_equity = self._money(
+        final_virtual_equity = self._money(
             self.state.virtual_cash + unrealized
         )
 
@@ -175,18 +179,18 @@ class BacktestAccountingMixin:
         self._check_accounting()
 
         closed_net = self._money(
-            sum(float(r["net_pnl"]) for r in self.state.closed_trade_records)
+            sum(float(r["net_pnl"]) for r in ledger.closed_records)
         )
 
         if self.logger.wants_event("BACKTEST_SELF_CHECK"):
             self.logger.event(
                 "BACKTEST_SELF_CHECK",
-                final_equity=self.state.final_virtual_equity,
+                final_equity=final_virtual_equity,
                 initial_cash=self._money(self.params.initial_cash),
                 closed_net_pnl=closed_net,
                 total_commission=self.state.total_commission,
-                closed_trades=self.state.closed_trades,
-                total_contracts=self.state.total_contracts,
+                closed_trades=ledger.closed_trades,
+                total_contracts=ledger.total_contracts,
                 open_position_size=self.state.virtual_position_size,
                 passed=True,
             )
@@ -200,17 +204,17 @@ class BacktestAccountingMixin:
                 entry_price=self.state.virtual_entry_price,
                 tp_level=self.state.tp_level,
                 sl_level=self.state.sl_level,
-                trade_id=self.state.trade_id,
+                trade_id=ledger.trade_id,
                 virtual_cash=self.state.virtual_cash,
                 unrealized_pnl=unrealized,
-                final_virtual_equity=self.state.final_virtual_equity,
+                final_virtual_equity=final_virtual_equity,
                 total_commission=self.state.total_commission,
             )
 
         if self.state.virtual_position_size:
             if self.logger.wants_warning_or_error():
                 self.logger.warning(
-                    f"OPEN_POSITION_AT_END trade_id = {self.state.trade_id}; "
+                    f"OPEN_POSITION_AT_END trade_id = {ledger.trade_id}; "
                     f"position_size = {self.state.virtual_position_size}; "
                     f"entry_price = {self.state.virtual_entry_price}; "
                     f"mark_price = {final_close}; "

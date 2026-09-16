@@ -11,6 +11,7 @@ from core.backtest_numeric import BacktestNumericMixin
 from core.backtest_signal import SignalEngine
 from core.backtest_state import BacktestState
 from core.backtest_trade import BacktestTradeMixin
+from core.backtest_trade_ledger import TradeLedger
 from core.backtest_trailing import BacktestTrailingMixin
 from core.backtest_result import BacktestResult
 
@@ -27,10 +28,8 @@ class NativeBacktestRuntime(
         self.params = params
         self.logger = logger
         initial_cash = self._money(params.initial_cash)
-        self.state = BacktestState(
-            virtual_cash=initial_cash,
-            final_virtual_equity=initial_cash,
-        )
+        self.state = BacktestState(virtual_cash=initial_cash)
+        self._trade_ledger = TradeLedger()
         self.market = Market()
         self._execution_engine = ExecutionEngine()
         self._execution_context = BacktestExecutionContext(self)
@@ -93,14 +92,17 @@ class NativeBacktestRuntime(
         # Use the same accounting stop lifecycle as the production strategy.
         self.stop()
         precision_money = self.params.precision_money
+        final_virtual_equity = self._money(
+            self.state.virtual_cash + self._unrealized_pnl()
+        )
         return BacktestResult(
-            final_portfolio_value=round(float(self.state.final_virtual_equity), precision_money),
+            final_portfolio_value=round(float(final_virtual_equity), precision_money),
             real_net_profit=round(
-                float(self.state.final_virtual_equity) - float(self.params.initial_cash),
+                float(final_virtual_equity) - float(self.params.initial_cash),
                 precision_money,
             ),
-            total_closed_trades=int(self.state.closed_trades),
-            total_contracts=int(self.state.total_contracts),
+            total_closed_trades=int(self._trade_ledger.closed_trades),
+            total_contracts=int(self._trade_ledger.total_contracts),
             total_commission=round(float(self.state.total_commission), precision_money),
             open_position_size=int(self.state.virtual_position_size),
             virtual_cash=round(float(self.state.virtual_cash), precision_money),

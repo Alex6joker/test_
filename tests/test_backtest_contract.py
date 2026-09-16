@@ -19,6 +19,7 @@ from core.backtest_numeric import BacktestNumericMixin
 from core.backtest_signal import BacktestSignalMixin
 from core.backtest_state import BacktestState
 from core.backtest_trade import BacktestTradeMixin
+from core.backtest_trade_ledger import TradeLedger
 from core.backtest_trailing import BacktestTrailingMixin
 
 
@@ -140,9 +141,9 @@ class VirtualStrategyContract(
 ):
     # Test-only compatibility facade. Production mixins access state directly.
     @property
-    def trade_id(self): return self.state.trade_id
+    def trade_id(self): return self._trade_ledger.trade_id
     @trade_id.setter
-    def trade_id(self, value): self.state.trade_id = value
+    def trade_id(self, value): self._trade_ledger._next_trade_id = value
 
     @property
     def last_trade_bar(self): return self.state.last_trade_bar
@@ -170,21 +171,6 @@ class VirtualStrategyContract(
     def virtual_entry_commission(self, value): self.state.virtual_entry_commission = value
 
     @property
-    def virtual_exit_commission(self): return self.state.virtual_exit_commission
-    @virtual_exit_commission.setter
-    def virtual_exit_commission(self, value): self.state.virtual_exit_commission = value
-
-    @property
-    def virtual_gross_pnl(self): return self.state.virtual_gross_pnl
-    @virtual_gross_pnl.setter
-    def virtual_gross_pnl(self, value): self.state.virtual_gross_pnl = value
-
-    @property
-    def entry_price(self): return self.state.entry_price
-    @entry_price.setter
-    def entry_price(self, value): self.state.entry_price = value
-
-    @property
     def tp_level(self): return self.state.tp_level
     @tp_level.setter
     def tp_level(self, value): self.state.tp_level = value
@@ -200,14 +186,14 @@ class VirtualStrategyContract(
     def current_trail_step(self, value): self.state.current_trail_step = value
 
     @property
-    def closed_trades(self): return self.state.closed_trades
+    def closed_trades(self): return self._trade_ledger.closed_trades
     @closed_trades.setter
-    def closed_trades(self, value): self.state.closed_trades = value
+    def closed_trades(self, value): self._trade_ledger._closed_trades = value
 
     @property
-    def total_contracts(self): return self.state.total_contracts
+    def total_contracts(self): return self._trade_ledger.total_contracts
     @total_contracts.setter
-    def total_contracts(self, value): self.state.total_contracts = value
+    def total_contracts(self, value): self._trade_ledger._total_contracts = value
 
     @property
     def total_commission(self): return self.state.total_commission
@@ -215,19 +201,20 @@ class VirtualStrategyContract(
     def total_commission(self, value): self.state.total_commission = value
 
     @property
-    def final_virtual_equity(self): return self.state.final_virtual_equity
-    @final_virtual_equity.setter
-    def final_virtual_equity(self, value): self.state.final_virtual_equity = value
+    def final_virtual_equity(self):
+        return self.virtual_cash + self._unrealized_pnl()
 
     @property
-    def _trade_records(self): return self.state.trade_records
+    def _trade_records(self): return self._trade_ledger.records
     @_trade_records.setter
-    def _trade_records(self, value): self.state.trade_records = value
+    def _trade_records(self, value):
+        self._trade_ledger._records = value
+        self._trade_ledger._active_record = next((r for r in reversed(value) if r.get("exit_bar") is None), None)
 
     @property
-    def _closed_trade_records(self): return self.state.closed_trade_records
+    def _closed_trade_records(self): return self._trade_ledger.closed_records
     @_closed_trade_records.setter
-    def _closed_trade_records(self, value): self.state.closed_trade_records = value
+    def _closed_trade_records(self, value): self._trade_ledger._closed_records = value
 
     def __init__(self, *, bar: Bar, position: int, entry: float, sl: float, tp: float):
         self.params = Params()
@@ -236,10 +223,10 @@ class VirtualStrategyContract(
         self.market = Market()
         self._bar_adapter = BacktraderBarAdapter()
         self.state = BacktestState()
+        self._trade_ledger = TradeLedger()
         self._execution_engine = ExecutionEngine()
         self._execution_context = BacktestExecutionContext(self)
 
-        self.trade_id = 1
         self.last_trade_bar = -1
         self.virtual_cash = self._money(self.params.initial_cash)
         self.virtual_position_size = position
@@ -247,33 +234,23 @@ class VirtualStrategyContract(
         self.virtual_entry_commission = self._money(10.185 * abs(position))
         if position:
             self.virtual_cash = self._money(self.virtual_cash - self.virtual_entry_commission)
-        self.virtual_exit_commission = 0.0
-        self.virtual_gross_pnl = 0.0
-        self.entry_price = entry
         self.tp_level = tp
         self.sl_level = sl
         self.current_trail_step = -1
         self.closed_trades = 0
         self.total_contracts = 0
         self.total_commission = self.virtual_entry_commission
-        self.final_virtual_equity = self.virtual_cash
-        self._trade_records = [{
-            "trade_id": 1,
-            "direction": "LONG" if position > 0 else "SHORT",
-            "size": abs(position),
-            "entry_bar": 2,
-            "entry_datetime": datetime(2026, 1, 1),
-            "entry_price": entry,
-            "entry_commission": self.virtual_entry_commission,
-            "exit_bar": None,
-            "exit_phase": None,
-            "exit_price": None,
-            "exit_reason": None,
-            "exit_commission": 0.0,
-            "gross_pnl": 0.0,
-            "net_pnl": None,
-        }]
-        self._closed_trade_records = []
+        if position:
+            self._trade_ledger.open_trade(
+                direction="LONG" if position > 0 else "SHORT",
+                size=abs(position),
+                bar_index=2,
+                entry_datetime=datetime(2026, 1, 1),
+                entry_price=entry,
+                entry_commission=self.virtual_entry_commission,
+            )
+        else:
+            self._trade_ledger._next_trade_id = 1
 
     def get_backtest_dynamic_slippage(self, size: int) -> float:
         return super().get_backtest_dynamic_slippage(size)
@@ -313,6 +290,8 @@ class BacktestContractTests(unittest.TestCase):
         s._trade_records = []
         s._closed_trade_records = []
         s.trade_id = 0
+        s._trade_ledger._closed_trades = 0
+        s._trade_ledger._total_contracts = 0
         s.virtual_cash = 264000.0
         s.total_commission = 0.0
         s.closed_trades = 0
@@ -548,7 +527,6 @@ class BacktestContractTests(unittest.TestCase):
         s._close_virtual_position("TAKE_PROFIT", 102.0, 102.0, 11, 2)
         self.assertEqual(s.virtual_position_size, 0)
         self.assertIsNone(s.virtual_entry_price)
-        self.assertIsNone(s.entry_price)
         self.assertIsNone(s.tp_level)
         self.assertIsNone(s.sl_level)
         self.assertEqual(s.current_trail_step, -1)

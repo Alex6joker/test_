@@ -87,11 +87,12 @@ def run_variant(cfg, processed_path: str, stdstats: bool):
     wall = time.perf_counter() - wall_start
     cpu = time.process_time() - cpu_start
     s = strategies[0]
+    final_virtual_equity = s.state.virtual_cash + s._unrealized_pnl()
     result = BacktestResult(
-        final_portfolio_value=round(float(s.state.final_virtual_equity), cfg.PRECISION_NUM_DEPO_RUB),
-        real_net_profit=round(float(s.state.final_virtual_equity) - float(cfg.INITIAL_CASH), cfg.PRECISION_NUM_DEPO_RUB),
-        total_closed_trades=int(s.state.closed_trades),
-        total_contracts=int(s.state.total_contracts),
+        final_portfolio_value=round(float(final_virtual_equity), cfg.PRECISION_NUM_DEPO_RUB),
+        real_net_profit=round(float(final_virtual_equity) - float(cfg.INITIAL_CASH), cfg.PRECISION_NUM_DEPO_RUB),
+        total_closed_trades=int(s._trade_ledger.closed_trades),
+        total_contracts=int(s._trade_ledger.total_contracts),
         total_commission=round(float(s.state.total_commission), cfg.PRECISION_NUM_DEPO_RUB),
         open_position_size=s.state.virtual_position_size,
         virtual_cash=round(float(s.state.virtual_cash), cfg.PRECISION_NUM_DEPO_RUB),

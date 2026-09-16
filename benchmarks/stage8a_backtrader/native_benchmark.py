@@ -60,12 +60,14 @@ def load_config():
     return module
 
 
-def result_dict(state, params) -> dict:
+def result_dict(state, params, ledger, final_virtual_equity=None) -> dict:
+    if final_virtual_equity is None:
+        final_virtual_equity = state.virtual_cash
     return {
-        "final_portfolio_value": round(float(state.final_virtual_equity), 2),
-        "real_net_profit": round(float(state.final_virtual_equity) - float(params.initial_cash), 2),
-        "total_closed_trades": int(state.closed_trades),
-        "total_contracts": int(state.total_contracts),
+        "final_portfolio_value": round(float(final_virtual_equity), 2),
+        "real_net_profit": round(float(final_virtual_equity) - float(params.initial_cash), 2),
+        "total_closed_trades": int(ledger.closed_trades),
+        "total_contracts": int(ledger.total_contracts),
         "total_commission": round(float(state.total_commission), 2),
         "open_position_size": int(state.virtual_position_size),
         "virtual_cash": round(float(state.virtual_cash), 2),
@@ -121,11 +123,10 @@ class NativeBacktestContext:
         self._host.params = params
         self._host.logger = logger
         initial_cash = self._host._money(params.initial_cash)
-        state = BacktestState(
-            virtual_cash=initial_cash,
-            final_virtual_equity=initial_cash,
-        )
+        state = BacktestState(virtual_cash=initial_cash)
         self._host.state = state
+        from core.backtest_trade_ledger import TradeLedger
+        self._host._trade_ledger = TradeLedger()
         self._host.market = Market()
         self._host._execution_engine = ExecutionEngine()
         self._host._execution_context = BacktestExecutionContext(self._host)
@@ -142,6 +143,7 @@ class NativeBacktestContext:
         # NativeBacktestContext delegates the lifecycle methods used by the
         # execution context while keeping all production algorithms intact.
         self.state = state
+        self._trade_ledger = self._host._trade_ledger
         self.market = self._host.market
         self._execution_engine = self._host._execution_engine
         self._execution_context = self._host._execution_context
@@ -163,13 +165,13 @@ class NativeBacktestContext:
         final_close = final_bar.close if final_bar is not None else None
         unrealized = self._host._unrealized_pnl(final_close)
         self.state.virtual_cash = self._host._money(self.state.virtual_cash)
-        self.state.final_virtual_equity = self._host._money(
+        final_virtual_equity = self._host._money(
             self.state.virtual_cash + unrealized
         )
         self._host._check_negative_cash()
         self._host._check_trade_lifecycle()
         self._host._check_accounting()
-        return result_dict(self.state, self._host.params)
+        return result_dict(self.state, self._host.params, self._trade_ledger, final_virtual_equity)
 
 
 def bars_from_dataframe(prepared):
@@ -237,11 +239,12 @@ def run_backtrader_off(cfg, processed_path):
     finally:
         logger.close()
     s = strategies[0]
+    final_virtual_equity = s.state.virtual_cash + s._unrealized_pnl()
     result = {
-        "final_portfolio_value": round(float(s.state.final_virtual_equity), 2),
-        "real_net_profit": round(float(s.state.final_virtual_equity) - float(cfg.INITIAL_CASH), 2),
-        "total_closed_trades": int(s.state.closed_trades),
-        "total_contracts": int(s.state.total_contracts),
+        "final_portfolio_value": round(float(final_virtual_equity), 2),
+        "real_net_profit": round(float(final_virtual_equity) - float(cfg.INITIAL_CASH), 2),
+        "total_closed_trades": int(s._trade_ledger.closed_trades),
+        "total_contracts": int(s._trade_ledger.total_contracts),
         "total_commission": round(float(s.state.total_commission), 2),
         "open_position_size": int(s.state.virtual_position_size),
         "virtual_cash": round(float(s.state.virtual_cash), 2),

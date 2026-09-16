@@ -16,6 +16,7 @@ from core.backtest_bar import Bar
 from core.backtest_market import Market
 from datetime import datetime
 from core.backtest_trailing import BacktestTrailingMixin
+from core.backtest_trade_ledger import TradeLedger
 
 
 class FakeLogger:
@@ -31,11 +32,18 @@ class ExecutionHarness(BacktestTrailingMixin, BacktestExecutionMixin):
         self.state = BacktestState(
             virtual_position_size=direction * size,
             virtual_entry_price=entry,
-            entry_price=entry,
             sl_level=sl,
             tp_level=tp,
             current_trail_step=-1,
-            trade_id=1,
+        )
+        self._trade_ledger = TradeLedger()
+        self._trade_ledger.open_trade(
+            direction="LONG" if direction > 0 else "SHORT",
+            size=size,
+            bar_index=0,
+            entry_datetime=datetime(2026, 1, 1),
+            entry_price=entry,
+            entry_commission=0.0,
         )
         self.params = SimpleNamespace(
             tp=tp - entry,

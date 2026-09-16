@@ -64,14 +64,15 @@ def make_params(cfg):
     )
 
 
-def result_dict(state, params):
+def result_dict(state, params, host):
+    final_virtual_equity = host._money(state.virtual_cash + host._unrealized_pnl())
     return {
-        "final_portfolio_value": round(float(state.final_virtual_equity), 2),
+        "final_portfolio_value": round(float(final_virtual_equity), 2),
         "real_net_profit": round(
-            float(state.final_virtual_equity) - float(params.initial_cash), 2
+            float(final_virtual_equity) - float(params.initial_cash), 2
         ),
-        "total_closed_trades": int(state.closed_trades),
-        "total_contracts": int(state.total_contracts),
+        "total_closed_trades": int(host._trade_ledger.closed_trades),
+        "total_contracts": int(host._trade_ledger.total_contracts),
         "total_commission": round(float(state.total_commission), 2),
         "open_position_size": int(state.virtual_position_size),
         "virtual_cash": round(float(state.virtual_cash), 2),
@@ -174,7 +175,7 @@ def run_native(cfg, prepared, log_path):
                 )
             )
         result = ctx.finish()
-        records = list(ctx.state.trade_records)
+        records = list(ctx._trade_ledger.records)
     finally:
         logger.close()
     return result, records
@@ -212,8 +213,8 @@ def run_backtrader(cfg, processed_path, log_path):
         logger.close()
 
     strategy = strategies[0]
-    result = result_dict(strategy.state, strategy.params)
-    records = list(strategy.state.trade_records)
+    result = result_dict(strategy.state, strategy.params, strategy)
+    records = list(strategy._trade_ledger.records)
     return result, records
 
 

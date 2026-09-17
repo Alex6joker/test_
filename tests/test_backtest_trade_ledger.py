@@ -3,6 +3,9 @@ from __future__ import annotations
 import unittest
 
 from core.backtest_trade_ledger import TradeLedger
+from core.backtest_trade import TradeAccountingEngine
+from core.backtest_state import BacktestState
+from types import SimpleNamespace
 
 
 class TradeLedgerTests(unittest.TestCase):
@@ -61,6 +64,76 @@ class TradeLedgerTests(unittest.TestCase):
         self.assertEqual(self.ledger.check(0), [
             "open trade record exists while position is flat",
         ])
+
+
+class TradeAccountingEngineTests(unittest.TestCase):
+    def setUp(self):
+        self.state = BacktestState(virtual_cash=264000.0)
+        self.params = SimpleNamespace(
+            real_mult=1000.0,
+            tp=1.9,
+            sl=1.7,
+        )
+        self.ledger = TradeLedger()
+        self.accounting = __import__(
+            "core.backtest_accounting", fromlist=["AccountingEngine"]
+        ).AccountingEngine(
+            self.state, self.params, lambda value: round(float(value), 2), 10.186
+        )
+
+        class Runtime:
+            pass
+
+        self.runtime = Runtime()
+        self.runtime.state = self.state
+        self.runtime.params = self.params
+        self.runtime._price = staticmethod(lambda value: round(float(value), 2))
+        self.runtime._accounting_engine = self.accounting
+        self.runtime._trade_ledger = self.ledger
+        self.runtime._ensure_accounting_engine = lambda: self.accounting
+        self.runtime._ensure_trade_ledger = lambda: self.ledger
+
+    def test_open_transaction_updates_state_accounting_and_ledger(self):
+        engine = TradeAccountingEngine(self.runtime)
+        bar = SimpleNamespace(open=100.0, datetime="dt")
+        record = engine.open(1, 5, 10, bar)
+
+        self.assertEqual(record["trade_id"], 1)
+        self.assertEqual(self.state.virtual_position_size, 5)
+        self.assertEqual(self.state.virtual_entry_price, 100.0)
+        self.assertEqual(self.state.virtual_cash, 263949.07)
+        self.assertEqual(self.ledger.active_record, record)
+
+    def test_close_transaction_realizes_accounting_and_ledger(self):
+        engine = TradeAccountingEngine(self.runtime)
+        bar = SimpleNamespace(open=100.0, datetime="dt")
+        engine.open(1, 5, 10, bar)
+        result = engine.close("TAKE_PROFIT", 101.98, 11, 2)
+
+        self.assertEqual(result["trade_id"], 1)
+        self.assertEqual(result["gross_pnl"], 9900.0)
+        self.assertEqual(result["net_pnl"], 9798.14)
+        self.assertEqual(self.state.virtual_cash, 273798.14)
+        self.assertEqual(self.ledger.closed_trades, 1)
+        self.assertIsNone(self.ledger.active_record)
+
+    def test_reset_position_only_clears_current_state(self):
+        engine = TradeAccountingEngine(self.runtime)
+        self.state.virtual_position_size = 5
+        self.state.virtual_entry_price = 100.0
+        self.state.virtual_entry_commission = 50.0
+        self.state.tp_level = 102.0
+        self.state.sl_level = 98.0
+        self.state.current_trail_step = 2
+        engine.reset_position()
+
+        self.assertEqual(self.state.virtual_position_size, 0)
+        self.assertIsNone(self.state.virtual_entry_price)
+        self.assertEqual(self.state.virtual_entry_commission, 0.0)
+        self.assertIsNone(self.state.tp_level)
+        self.assertIsNone(self.state.sl_level)
+        self.assertEqual(self.state.current_trail_step, -1)
+        self.assertEqual(self.ledger.records, [])
 
 
 if __name__ == "__main__":

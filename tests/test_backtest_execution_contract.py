@@ -10,7 +10,7 @@ core_pkg = types.ModuleType("core")
 core_pkg.__path__ = [os.path.join(os.path.dirname(__file__), "..", "core")]
 sys.modules.setdefault("core", core_pkg)
 
-from core.backtest_execution import BacktestExecutionMixin, ExecutionEngine
+from core.backtest_execution import BacktestExecutionMixin, ExecutionEngine, ExecutionSnapshot, TrailLevel
 from core.backtest_state import BacktestState
 from core.backtest_bar import Bar
 from core.backtest_market import Market
@@ -62,6 +62,39 @@ class ExecutionHarness(BacktestTrailingMixin, BacktestExecutionMixin):
 
 
 class BacktestExecutionContractTests(unittest.TestCase):
+    def test_pure_engine_phase_input_state_tracks_previous_trail(self):
+        engine = ExecutionEngine()
+        snapshot = ExecutionSnapshot(
+            position_size=-5,
+            entry_price=100.0,
+            sl_level=102.0,
+            tp_level=97.0,
+            current_trail_step=-1,
+            trail_levels=(
+                TrailLevel(0, 99.0, 99.5),
+            ),
+            slippage=0.02,
+        )
+        result = engine.process(
+            snapshot,
+            Bar(
+                datetime=datetime(2026, 1, 1, 10, 0),
+                open=100.0,
+                high=100.0,
+                low=98.0,
+                close=98.0,
+                volume=1.0,
+            ),
+            bar_index=1,
+        )
+        self.assertEqual(result.phases[0].sl_level, 102.0)
+        self.assertEqual(result.phases[1].sl_level, 102.0)
+        self.assertEqual(result.phases[1].trail_step, -1)
+        self.assertEqual(result.phases[1].resulting_sl_level, 99.5)
+        self.assertEqual(result.phases[1].resulting_trail_step, 0)
+        self.assertEqual(result.phases[2].sl_level, 99.5)
+        self.assertEqual(result.phases[2].trail_step, 0)
+
     def test_dynamic_slippage_boundaries(self):
         self.assertEqual(ExecutionEngine.get_backtest_dynamic_slippage(5), 0.02)
         self.assertEqual(ExecutionEngine.get_backtest_dynamic_slippage(6), 0.04)
@@ -193,6 +226,74 @@ class BacktestExecutionContractTests(unittest.TestCase):
 
         self.assertEqual(phases, [0])
         self.assertEqual(len(engine.closed), 1)
+
+
+class PureExecutionEngineTests(unittest.TestCase):
+    def _snapshot(self, direction=1, size=5, entry=100.0, sl=98.0, tp=103.0, step=-1, levels=()):
+        from core.backtest_execution import ExecutionSnapshot
+        return ExecutionSnapshot(
+            position_size=direction * size,
+            entry_price=entry,
+            sl_level=sl,
+            tp_level=tp,
+            current_trail_step=step,
+            trail_levels=tuple(levels),
+            slippage=ExecutionEngine.get_backtest_dynamic_slippage(size),
+        )
+
+    def test_pure_engine_does_not_require_runtime_context(self):
+        engine = ExecutionEngine()
+        result = engine.process(self._snapshot(), Bar(datetime(2026,1,1),100,104,97,101,1), 10)
+        self.assertEqual(result.exit.reason, "STOP_LOSS")
+        self.assertEqual(result.exit.detected_price, 98.0)
+        self.assertEqual(result.exit.execution_price, 97.98)
+
+    def test_fast_path_matches_full_path_for_trail_and_exit_decisions(self):
+        from core.backtest_execution import ExecutionSnapshot, TrailLevel
+        snap = self._snapshot(
+            entry=100, sl=98, tp=110,
+            levels=(
+                TrailLevel(0, 103.5, 100.55),
+                TrailLevel(1, 107.5, 101.65),
+            ),
+        )
+        bar = Bar(datetime(2026, 1, 1), 100, 111, 97, 101, 1)
+        engine = ExecutionEngine()
+
+        full = engine.process(snap, bar, 10)
+        fast_updates, fast_exit = engine.process_fast(snap, bar, 10)
+
+        self.assertEqual(
+            [(u.step_idx, u.trigger_price, u.new_sl) for phase in full.phases for u in phase.trail_updates],
+            [(u.step_idx, u.trigger_price, u.new_sl) for u in fast_updates],
+        )
+        self.assertEqual(full.exit.event_type if full.exit else None, fast_exit.event_type if fast_exit else None)
+        self.assertEqual(full.exit.detected_price if full.exit else None, fast_exit.detected_price if fast_exit else None)
+        self.assertEqual(full.exit.execution_price if full.exit else None, fast_exit.execution_price if fast_exit else None)
+        self.assertEqual(full.exit.phase_index if full.exit else None, fast_exit.phase_index if fast_exit else None)
+
+    def test_fast_path_does_not_mutate_snapshot(self):
+        snap = self._snapshot(
+            entry=100, sl=98, tp=110,
+            levels=(TrailLevel(0, 103.5, 100.55),),
+        )
+        original = snap
+        ExecutionEngine().process_fast(
+            snap, Bar(datetime(2026, 1, 1), 100, 108, 97, 101, 1), 10
+        )
+        self.assertEqual(snap, original)
+
+    def test_pure_engine_returns_trail_then_exit_causally(self):
+        from core.backtest_execution import ExecutionSnapshot, TrailLevel
+        snap = self._snapshot(
+            entry=100, sl=98, tp=110,
+            levels=(TrailLevel(0, 103.5, 100.55), TrailLevel(1, 107.5, 101.65)),
+        )
+        engine = ExecutionEngine()
+        result = engine.process(snap, Bar(datetime(2026,1,1),100,108,100,108,1), 10)
+        self.assertIsNone(result.exit)
+        self.assertEqual([u.step_idx for u in result.phases[1].trail_updates], [0, 1])
+        self.assertEqual(result.phases[1].resulting_sl_level, 101.65)
 
 
 if __name__ == "__main__":

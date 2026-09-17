@@ -4,7 +4,7 @@ import os
 
 import backtrader as bt
 
-from core.backtest_engine import RealisticFuturesStrategy
+from core.backtest_adapter import RealisticFuturesStrategy
 from core.backtest_result import BacktestResult
 from core.backtest_adapter import BacktraderFeedAdapter
 

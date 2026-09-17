@@ -174,8 +174,10 @@ def run_native(cfg, bars, log_path):
 
 def run_backtrader(cfg, processed_path, log_path):
     import backtrader as bt
-    from core.backtest_adapter import BacktraderFeedAdapter
-    from core.backtest_engine import RealisticFuturesStrategy
+    from core.backtest_adapter import (
+        BacktraderFeedAdapter,
+        RealisticFuturesStrategy,
+    )
     from core.backtest_logger import BacktestLogger
 
     logger = BacktestLogger(str(log_path), reset=True, mode="FAST")

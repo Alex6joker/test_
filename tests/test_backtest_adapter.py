@@ -5,6 +5,7 @@ import sys
 import importlib.util
 import types
 import unittest
+from pathlib import Path
 from datetime import datetime
 
 core_pkg = types.ModuleType("core")
@@ -130,6 +131,21 @@ class BacktestAdapterTests(unittest.TestCase):
         self.assertEqual(feed.p.close, 4)
         self.assertEqual(feed.p.volume, 5)
         self.assertEqual(feed.p.openinterest, -1)
+
+    def test_backtrader_strategy_has_canonical_adapter_owner(self):
+        adapter_source = Path(__file__).resolve().parents[1] / "core" / "backtest_adapter.py"
+        engine_source = Path(__file__).resolve().parents[1] / "core" / "backtest_engine.py"
+        adapter_text = adapter_source.read_text(encoding="utf-8")
+        engine_text = engine_source.read_text(encoding="utf-8")
+        self.assertIn("class RealisticFuturesStrategy(", adapter_text)
+        self.assertIn("from .backtest_adapter import", engine_text)
+        self.assertNotIn("import backtrader as bt", engine_text)
+
+    def test_framework_independent_loop_has_no_backtrader_dependency(self):
+        loop_source = Path(__file__).resolve().parents[1] / "core" / "backtest_loop.py"
+        loop_text = loop_source.read_text(encoding="utf-8")
+        self.assertNotIn("import backtrader", loop_text)
+        self.assertNotIn("from backtrader", loop_text)
 
     def test_adapter_does_not_modify_source_data(self):
         data = self.make_data()

@@ -21,7 +21,7 @@ __all__ = [
 def __getattr__(name):
     """Lazily resolve legacy public exports when explicitly requested."""
     if name == "RealisticFuturesStrategy":
-        from core.backtest_engine import RealisticFuturesStrategy
+        from core.backtest_adapter import RealisticFuturesStrategy
         return RealisticFuturesStrategy
     if name == "ContractVolumeAnalyzer":
         from core.backtest_compat import ContractVolumeAnalyzer

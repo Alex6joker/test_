@@ -10,7 +10,7 @@ from concurrent.futures import ProcessPoolExecutor
 import time  # Добавьте в самый верх файла к остальным импортам
 
 # Импортируем компоненты из ядра
-from core.backtest_engine import RealisticFuturesStrategy, ContractVolumeAnalyzer
+from core.backtest_adapter import RealisticFuturesStrategy, ContractVolumeAnalyzer
 
 # Глобальный контекст для передачи настроек в воркеры (избегаем ошибок сериализации)
 _worker_cfg = None

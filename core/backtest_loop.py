@@ -23,8 +23,8 @@ class BacktestRuntime(Protocol):
 class BacktestEngine:
     """Common per-bar orchestration for all virtual-backtest frontends.
 
-    This class deliberately contains no Backtrader dependency. A frontend is
-    responsible only for converting its input into ``Bar`` and providing the
+    This class is framework-independent. A frontend is responsible only for
+    converting its input into ``Bar`` and providing the
     runtime boundary required by the already extracted virtual components.
     """
 

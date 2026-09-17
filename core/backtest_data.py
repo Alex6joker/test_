@@ -143,20 +143,3 @@ def dataframe_to_bars(df) -> list[Bar]:
         )
         for row in df.itertuples(index=False)
     ]
-
-
-def export_backtrader_adapter(bars, processed_path: str) -> None:
-    """Write the temporary Backtrader CSV adapter from a Bar sequence."""
-    import pandas as pd
-
-    export_df = pd.DataFrame(
-        {
-            "DateTime": [bar.datetime.strftime("%Y%m%d %H%M%S") for bar in bars],
-            "Open": [bar.open for bar in bars],
-            "High": [bar.high for bar in bars],
-            "Low": [bar.low for bar in bars],
-            "Close": [bar.close for bar in bars],
-            "Volume": [bar.volume for bar in bars],
-        }
-    )
-    export_df.to_csv(processed_path, index=False)

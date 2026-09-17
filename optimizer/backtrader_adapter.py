@@ -1,4 +1,4 @@
-"""Backtrader boundary for the virtual backtester.
+"""Backtrader infrastructure used by the optimizer.
 
 Only this module owns conversion between Backtrader data/feed objects and the
 virtual Bar model.  Virtual-market code must consume Bar/Market objects and
@@ -68,7 +68,7 @@ if bt is not None:
     from core.backtest_trade import BacktestTradeMixin
     from core.backtest_trade_ledger import TradeLedger
     from core.backtest_trailing import BacktestTrailingMixin
-    from core.backtest_compat import ContractVolumeAnalyzer
+    from optimizer.backtrader_compat import ContractVolumeAnalyzer
 
 if bt is not None:
     class RealisticFuturesStrategy(

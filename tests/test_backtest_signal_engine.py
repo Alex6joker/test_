@@ -12,7 +12,7 @@ core_pkg.__path__ = [os.path.join(os.path.dirname(__file__), "..", "core")]
 sys.modules.setdefault("core", core_pkg)
 
 from core.backtest_bar import Bar
-from core.backtest_signal import EntryIntent, SignalEngine
+from core.backtest_signal import EntryIntent, SignalEngine, SignalInput, SignalIntent
 
 
 @dataclass
@@ -122,3 +122,57 @@ class SignalEngineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class SignalInputContractTests(unittest.TestCase):
+    def setUp(self):
+        self.logger = Logger()
+        self.engine = SignalEngine(Params(), self.logger, lambda x: round(float(x), 2))
+        self.dt = datetime(2026, 1, 1)
+
+    def bar(self, o, h, l, c, volume=100):
+        return Bar(self.dt, o, h, l, c, volume)
+
+    def test_signal_input_is_immutable(self):
+        inp = SignalInput(
+            self.bar(100, 101, 99, 100.5),
+            self.bar(99, 100, 98, 99.5),
+            2, 0, 264000.0,
+        )
+        with self.assertRaises(Exception):
+            inp.bar_index = 3
+
+    def test_evaluate_input_returns_signal_intent(self):
+        previous = self.bar(100.0, 101.0, 100.0, 100.5)
+        current = self.bar(100.5, 101.0, 100.0, 100.2)
+        result = self.engine.evaluate_input(SignalInput(current, previous, 2, 0, 264000.0))
+        self.assertIsInstance(result, SignalIntent)
+        self.assertEqual((result.direction, result.signal_bar_index), (1, 2))
+
+    def test_evaluate_fast_matches_input_boundary(self):
+        previous = self.bar(100.0, 101.0, 100.0, 100.5)
+        current = self.bar(100.5, 101.0, 100.0, 100.2)
+        new = self.engine.evaluate_input(
+            SignalInput(current, previous, 2, 0, 264000.0)
+        )
+        fast = self.engine.evaluate_fast(
+            current_bar=current,
+            previous_bar=previous,
+            bar_index=2,
+            position_size=0,
+            virtual_cash=264000.0,
+        )
+        self.assertEqual(new, fast)
+
+    def test_legacy_evaluate_matches_new_boundary(self):
+        previous = self.bar(100.0, 101.0, 100.0, 100.5)
+        current = self.bar(100.5, 101.0, 100.0, 100.2)
+        from core.backtest_signal import SignalInput
+        new = self.engine.evaluate_input(SignalInput(current, previous, 2, 0, 264000.0))
+        legacy = self.engine.evaluate(
+            current_bar=current,
+            previous_bar=previous,
+            bar_index=2,
+            position_size=0,
+            virtual_cash=264000.0,
+        )
+        self.assertEqual(new, legacy)

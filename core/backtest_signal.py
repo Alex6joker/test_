@@ -6,12 +6,27 @@ from .backtest_bar import Bar
 
 
 @dataclass(frozen=True, slots=True)
-class EntryIntent:
+class SignalInput:
+    """Immutable observation supplied to the signal layer."""
+
+    current_bar: Bar
+    previous_bar: Bar
+    bar_index: int
+    position_size: int
+    virtual_cash: float
+
+
+@dataclass(frozen=True, slots=True)
+class SignalIntent:
     """Immutable signal-to-execution request."""
 
     direction: int
     size: int
     signal_bar_index: int
+
+
+# Compatibility name retained for existing callers/tests.
+EntryIntent = SignalIntent
 
 
 class SignalEngine:
@@ -22,15 +37,29 @@ class SignalEngine:
         self.logger = logger
         self._price = price_fn
 
-    def evaluate(
+    def evaluate_input(self, signal_input: SignalInput) -> SignalIntent | None:
+        """Evaluate one immutable market observation and return an intent."""
+        return self.evaluate_fast(
+            signal_input.current_bar,
+            signal_input.previous_bar,
+            signal_input.bar_index,
+            signal_input.position_size,
+            signal_input.virtual_cash,
+        )
+
+    def evaluate_fast(
         self,
-        *,
         current_bar: Bar,
         previous_bar: Bar,
         bar_index: int,
         position_size: int,
         virtual_cash: float,
-    ) -> EntryIntent | None:
+    ) -> SignalIntent | None:
+        """Hot-path SignalEngine boundary without per-bar input allocation."""
+        params = self.params
+        logger = self.logger
+        price = self._price
+
         previous_open = previous_bar.open
         previous_high = previous_bar.high
         previous_low = previous_bar.low
@@ -38,10 +67,10 @@ class SignalEngine:
         previous_volume = previous_bar.volume
 
         previous_range_raw = previous_high - previous_low
-        previous_range = self._price(previous_range_raw)
+        previous_range = price(previous_range_raw)
         previous_bullish = previous_close > previous_open
         previous_bearish = previous_close < previous_open
-        range_ok = previous_range >= float(self.params.trigger)
+        range_ok = previous_range >= float(params.trigger)
 
         long_signal_value = bool(range_ok and previous_bullish)
         short_signal_value = bool(range_ok and previous_bearish)
@@ -49,8 +78,8 @@ class SignalEngine:
         # ATR is intentionally diagnostic only.
         atr_diagnostic = None
 
-        if self.logger.wants_debug_event("SIGNAL_EVALUATION"):
-            self.logger.debug_event(
+        if logger.wants_debug_event("SIGNAL_EVALUATION"):
+            logger.debug_event(
                 "SIGNAL_EVALUATION",
                 bar_index=bar_index,
                 datetime=current_bar.datetime,
@@ -66,7 +95,7 @@ class SignalEngine:
                 previous_volume=previous_volume,
                 previous_range_raw=previous_range_raw,
                 previous_range=previous_range,
-                trigger=self.params.trigger,
+                trigger=params.trigger,
                 range_ok=range_ok,
                 previous_bullish=previous_bullish,
                 previous_bearish=previous_bearish,
@@ -87,15 +116,15 @@ class SignalEngine:
             1 if long_signal_value else (-1 if short_signal_value else 0)
         )
 
-        if self.logger.wants_debug_event("SIGNAL_DECISION"):
-            self.logger.debug_event(
+        if logger.wants_debug_event("SIGNAL_DECISION"):
+            logger.debug_event(
                 "SIGNAL_DECISION",
                 bar_index=bar_index,
                 long_signal=long_signal_value,
                 short_signal=short_signal_value,
                 selected_signal=selected_signal,
                 previous_range=previous_range,
-                trigger=self.params.trigger,
+                trigger=params.trigger,
                 previous_bullish=previous_bullish,
                 previous_bearish=previous_bearish,
             )
@@ -103,7 +132,7 @@ class SignalEngine:
         if selected_signal == 0:
             return None
 
-        return EntryIntent(
+        return SignalIntent(
             direction=selected_signal,
             size=self.calculate_position_size(
                 virtual_cash=virtual_cash,
@@ -111,6 +140,26 @@ class SignalEngine:
                 bar_index=bar_index,
             ),
             signal_bar_index=bar_index,
+        )
+
+    def evaluate(
+        self,
+        *,
+        current_bar: Bar,
+        previous_bar: Bar,
+        bar_index: int,
+        position_size: int,
+        virtual_cash: float,
+    ) -> SignalIntent | None:
+        """Compatibility adapter for the pre-SignalInput API."""
+        return self.evaluate_input(
+            SignalInput(
+                current_bar=current_bar,
+                previous_bar=previous_bar,
+                bar_index=bar_index,
+                position_size=position_size,
+                virtual_cash=virtual_cash,
+            )
         )
 
     def calculate_position_size(

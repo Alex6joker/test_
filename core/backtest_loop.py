@@ -36,7 +36,9 @@ class BacktestEngine:
         market = runtime.market
         state = runtime.state
         logger = runtime.logger
-        debug_enabled = getattr(logger, "is_diagnostic", logger.wants_debug_event("BAR"))
+        debug_enabled = getattr(logger, "is_diagnostic", None)
+        if debug_enabled is None:
+            debug_enabled = logger.wants_debug_event("BAR")
 
         market.observe(bar)
         current_bar_index = market.bar_index
@@ -74,12 +76,12 @@ class BacktestEngine:
         if previous_bar is None:
             raise RuntimeError("Market.previous_bar is required for signal evaluation")
 
-        intent = runtime._signal_engine.evaluate(
-            current_bar=bar,
-            previous_bar=previous_bar,
-            bar_index=current_bar_index,
-            position_size=state.virtual_position_size,
-            virtual_cash=state.virtual_cash,
+        intent = runtime._signal_engine.evaluate_fast(
+            bar,
+            previous_bar,
+            current_bar_index,
+            state.virtual_position_size,
+            state.virtual_cash,
         )
 
         if state.virtual_position_size:

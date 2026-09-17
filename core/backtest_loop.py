@@ -11,20 +11,20 @@ class BacktestRuntime(Protocol):
     market: object
     state: object
     logger: object
-    _signal_engine: object
-    _execution_engine: object
-    _execution_context: object
+    signal_engine: object
+    execution_engine: object
+    execution_context: object
 
-    def _log_virtual_portfolio(self, bar_index: int) -> None: ...
+    def log_virtual_portfolio(self, bar_index: int) -> None: ...
 
-    def _open_virtual_position(self, signal: int, size: int, bar_index: int) -> None: ...
+    def open_virtual_position(self, signal: int, size: int, bar_index: int) -> None: ...
 
 
 class BacktestEngine:
     """Common per-bar orchestration for all virtual-backtest frontends.
 
-    This class is framework-independent. A frontend is responsible only for
-    converting its input into ``Bar`` and providing the
+    This class deliberately contains no Backtrader dependency. A frontend is
+    responsible only for converting its input into ``Bar`` and providing the
     runtime boundary required by the already extracted virtual components.
     """
 
@@ -61,7 +61,7 @@ class BacktestEngine:
             )
 
         if debug_enabled:
-            runtime._log_virtual_portfolio(current_bar_index)
+            runtime.log_virtual_portfolio(current_bar_index)
 
         if current_bar_index < 2:
             if debug_enabled:
@@ -76,7 +76,7 @@ class BacktestEngine:
         if previous_bar is None:
             raise RuntimeError("Market.previous_bar is required for signal evaluation")
 
-        intent = runtime._signal_engine.evaluate_fast(
+        intent = runtime.signal_engine.evaluate_fast(
             bar,
             previous_bar,
             current_bar_index,
@@ -85,8 +85,8 @@ class BacktestEngine:
         )
 
         if state.virtual_position_size:
-            runtime._execution_engine.process_bar(
-                context=runtime._execution_context,
+            runtime.execution_engine.process_bar(
+                context=runtime.execution_context,
                 bar=bar,
                 bar_index=current_bar_index,
             )
@@ -103,13 +103,13 @@ class BacktestEngine:
                 )
             return
 
-        runtime._open_virtual_position(
+        runtime.open_virtual_position(
             signal=intent.direction,
             size=intent.size,
             bar_index=intent.signal_bar_index,
         )
-        runtime._execution_engine.process_bar(
-            context=runtime._execution_context,
+        runtime.execution_engine.process_bar(
+            context=runtime.execution_context,
             bar=bar,
             bar_index=current_bar_index,
         )

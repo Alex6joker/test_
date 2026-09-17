@@ -25,10 +25,6 @@ class SignalIntent:
     signal_bar_index: int
 
 
-# Compatibility name retained for existing callers/tests.
-EntryIntent = SignalIntent
-
-
 class SignalEngine:
     """Evaluate entry signals and position sizing from virtual-market data."""
 
@@ -210,29 +206,3 @@ class SignalEngine:
 
         return dynamic_size
 
-
-class BacktestSignalMixin:
-    """Backtrader compatibility facade around the common backtest loop."""
-
-    def _calculate_position_size(self, bar_index: int) -> int:
-        """Compatibility facade for existing contract tests."""
-        if not hasattr(self, "_signal_engine"):
-            self._signal_engine = SignalEngine(self.params, self.logger, self._price)
-        previous_bar = self.market.previous_bar
-        if previous_bar is None:
-            raise RuntimeError("Market.previous_bar is required for position sizing")
-        return self._signal_engine.calculate_position_size(
-            virtual_cash=self.state.virtual_cash,
-            previous_volume=previous_bar.volume,
-            bar_index=bar_index,
-        )
-
-    def next(self):
-        """Convert the Backtrader observation to Bar and enter the common loop."""
-        if not hasattr(self, "_signal_engine"):
-            self._signal_engine = SignalEngine(self.params, self.logger, self._price)
-        if not hasattr(self, "_backtest_engine"):
-            from core.backtest_loop import BacktestEngine
-            self._backtest_engine = BacktestEngine(self)
-        current_bar = self._bar_adapter.to_bar(self.data)
-        self._backtest_engine.process_bar(current_bar)

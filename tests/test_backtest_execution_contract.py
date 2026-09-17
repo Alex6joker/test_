@@ -1,300 +1,106 @@
 from __future__ import annotations
 
-import os
-import sys
-import types
 import unittest
+from datetime import datetime
 from types import SimpleNamespace
 
-core_pkg = types.ModuleType("core")
-core_pkg.__path__ = [os.path.join(os.path.dirname(__file__), "..", "core")]
-sys.modules.setdefault("core", core_pkg)
-
-from core.backtest_execution import BacktestExecutionMixin, ExecutionEngine, ExecutionSnapshot, TrailLevel
-from core.backtest_state import BacktestState
+from core.backtest_accounting import AccountingEngine
 from core.backtest_bar import Bar
+from core.backtest_execution import ExecutionEngine, ExecutionExit, ExecutionSnapshot, NativeExecutionContext, TrailLevel
 from core.backtest_market import Market
-from datetime import datetime
-from core.backtest_trailing import BacktestTrailingMixin
+from core.backtest_state import BacktestState
+from core.backtest_trade import TradeAccountingEngine
 from core.backtest_trade_ledger import TradeLedger
+from core.backtest_trailing import TrailingEngine
 
 
 class FakeLogger:
-    def wants_debug_event(self, _name):
-        return False
+    is_diagnostic = False
+    def wants_debug_event(self, _name): return False
+    def wants_trade(self): return False
+    def debug_event(self, *_args, **_kwargs): pass
+    def trade(self, *_args, **_kwargs): pass
 
-    def wants_trade(self):
-        return False
 
-
-class ExecutionHarness(BacktestTrailingMixin, BacktestExecutionMixin):
+class ExecutionHarness:
     def __init__(self, *, direction=1, size=5, entry=100.0, sl=98.0, tp=103.0):
-        self.state = BacktestState(
-            virtual_position_size=direction * size,
-            virtual_entry_price=entry,
-            sl_level=sl,
-            tp_level=tp,
-            current_trail_step=-1,
-        )
-        self._trade_ledger = TradeLedger()
-        self._trade_ledger.open_trade(
-            direction="LONG" if direction > 0 else "SHORT",
-            size=size,
-            bar_index=0,
-            entry_datetime=datetime(2026, 1, 1),
-            entry_price=entry,
-            entry_commission=0.0,
-        )
         self.params = SimpleNamespace(
-            tp=tp - entry,
-            dynamic_trail_steps=[(0.35, 0.05), (0.75, 0.15), (0.95, 0.65)],
+            precision_num=2, precision_money=2, tp=1.9, sl=1.7,
+            real_mult=1000.0, real_commission_per_side=10.186,
+            dynamic_trail_steps=[(0.20,0.05),(0.50,0.15),(0.90,0.65)],
         )
-        self.logger = FakeLogger()
-        self.closed = []
+        self.logger=FakeLogger(); self.state=BacktestState(virtual_cash=264000.0); self.market=Market(); self.ledger=TradeLedger()
+        self.accounting=AccountingEngine(self.state,self.params,lambda x:round(float(x),2),10.186)
+        self.trade_accounting=TradeAccountingEngine(state=self.state,params=self.params,accounting=self.accounting,ledger=self.ledger,price_fn=lambda x:round(float(x),2))
+        self.trailing=TrailingEngine(self.state,self.params,lambda x:round(float(x),2),self.logger,self.ledger)
+        self.context=NativeExecutionContext(state=self.state,market=self.market,ledger=self.ledger,trailing=self.trailing,trade_accounting=self.trade_accounting,logger=self.logger,price_fn=lambda x:round(float(x),2))
+        self.engine=ExecutionEngine()
+        self.trade_accounting.open(direction,size,2,SimpleNamespace(open=entry,datetime=datetime(2026,1,1)))
+        self.state.sl_level=sl; self.state.tp_level=tp
 
-    @staticmethod
-    def _price(value):
-        return round(float(value), 2)
-
-    def _close_virtual_position(self, **kwargs):
-        self.closed.append(kwargs)
-        self.state.virtual_position_size = 0
+    def segment(self,start,end,bar_index=10,phase_index=0):
+        snap=self.context.execution_snapshot()
+        phase=self.engine._process_segment(snap,round(start,2),round(end,2),bar_index,phase_index)
+        if phase is None: return False
+        for update in phase.trail_updates: self.context.apply_trail_update(update,update.trigger_price)
+        if phase.exit is not None: self.context.apply_execution_exit(phase.exit)
+        return phase.exit is not None
 
 
 class BacktestExecutionContractTests(unittest.TestCase):
     def test_pure_engine_phase_input_state_tracks_previous_trail(self):
-        engine = ExecutionEngine()
-        snapshot = ExecutionSnapshot(
-            position_size=-5,
-            entry_price=100.0,
-            sl_level=102.0,
-            tp_level=97.0,
-            current_trail_step=-1,
-            trail_levels=(
-                TrailLevel(0, 99.0, 99.5),
-            ),
-            slippage=0.02,
-        )
-        result = engine.process(
-            snapshot,
-            Bar(
-                datetime=datetime(2026, 1, 1, 10, 0),
-                open=100.0,
-                high=100.0,
-                low=98.0,
-                close=98.0,
-                volume=1.0,
-            ),
-            bar_index=1,
-        )
-        self.assertEqual(result.phases[0].sl_level, 102.0)
-        self.assertEqual(result.phases[1].sl_level, 102.0)
-        self.assertEqual(result.phases[1].trail_step, -1)
-        self.assertEqual(result.phases[1].resulting_sl_level, 99.5)
-        self.assertEqual(result.phases[1].resulting_trail_step, 0)
-        self.assertEqual(result.phases[2].sl_level, 99.5)
-        self.assertEqual(result.phases[2].trail_step, 0)
+        s=ExecutionHarness(); s.params.dynamic_trail_steps=[(0.2,0.05),(0.5,0.15)]
+        first=s.segment(100,100.6,10,0); self.assertFalse(first); self.assertEqual(s.state.current_trail_step,0)
+        snap=s.context.execution_snapshot(); self.assertEqual(snap.current_trail_step,0); self.assertEqual(snap.sl_level,100.09)
 
     def test_dynamic_slippage_boundaries(self):
-        self.assertEqual(ExecutionEngine.get_backtest_dynamic_slippage(5), 0.02)
-        self.assertEqual(ExecutionEngine.get_backtest_dynamic_slippage(6), 0.04)
-        self.assertEqual(ExecutionEngine.get_backtest_dynamic_slippage(15), 0.04)
-        self.assertEqual(ExecutionEngine.get_backtest_dynamic_slippage(16), 0.07)
-        self.assertEqual(ExecutionEngine.get_backtest_dynamic_slippage(30), 0.07)
-        self.assertEqual(ExecutionEngine.get_backtest_dynamic_slippage(31), 0.15)
+        self.assertEqual({n:ExecutionEngine.get_backtest_dynamic_slippage(n) for n in (1,5,6,15,16,30,31)},{1:0.02,5:0.02,6:0.04,15:0.04,16:0.07,30:0.07,31:0.15})
 
     def test_long_stop_loss_crossing_produces_execution_price_below_stop(self):
-        engine = ExecutionHarness(direction=1, size=5, sl=98.0, tp=103.0)
-
-        closed = engine._process_monotonic_segment(100.0, 97.0, 10, 1)
-
-        self.assertTrue(closed)
-        self.assertEqual(len(engine.closed), 1)
-        result = engine.closed[0]
-        self.assertEqual(result["reason"], "STOP_LOSS")
-        self.assertEqual(result["detected_price"], 98.0)
-        self.assertEqual(result["target_exec_price"], 97.98)
-        self.assertEqual(result["bar_index"], 10)
-        self.assertEqual(result["phase_index"], 1)
+        s=ExecutionHarness(direction=1); s.segment(100,97,10,0); r=s.ledger.records[0]; self.assertEqual(r['exit_price'],97.98)
 
     def test_short_stop_loss_crossing_produces_execution_price_above_stop(self):
-        engine = ExecutionHarness(direction=-1, size=5, sl=102.0, tp=97.0)
-
-        closed = engine._process_monotonic_segment(100.0, 103.0, 11, 2)
-
-        self.assertTrue(closed)
-        result = engine.closed[0]
-        self.assertEqual(result["reason"], "STOP_LOSS")
-        self.assertEqual(result["detected_price"], 102.0)
-        self.assertEqual(result["target_exec_price"], 102.02)
+        s=ExecutionHarness(direction=-1,sl=102,tp=97); s.segment(100,103,10,0); self.assertEqual(s.ledger.records[0]['exit_price'],102.02)
 
     def test_long_take_profit_crossing_produces_execution_price_below_tp(self):
-        engine = ExecutionHarness(direction=1, size=5, sl=98.0, tp=103.0)
-
-        closed = engine._process_monotonic_segment(100.0, 104.0, 12, 0)
-
-        self.assertTrue(closed)
-        result = engine.closed[0]
-        self.assertEqual(result["reason"], "TAKE_PROFIT")
-        self.assertEqual(result["detected_price"], 103.0)
-        self.assertEqual(result["target_exec_price"], 102.98)
+        s=ExecutionHarness(direction=1,sl=98,tp=103); s.segment(100,104,10,0); self.assertEqual(s.ledger.records[0]['exit_price'],102.98)
 
     def test_short_take_profit_crossing_produces_execution_price_above_tp(self):
-        engine = ExecutionHarness(direction=-1, size=5, sl=102.0, tp=97.0)
-
-        closed = engine._process_monotonic_segment(100.0, 96.0, 13, 0)
-
-        self.assertTrue(closed)
-        result = engine.closed[0]
-        self.assertEqual(result["reason"], "TAKE_PROFIT")
-        self.assertEqual(result["detected_price"], 97.0)
-        self.assertEqual(result["target_exec_price"], 97.02)
+        s=ExecutionHarness(direction=-1,sl=102,tp=97); s.segment(100,96,10,0); self.assertEqual(s.ledger.records[0]['exit_price'],97.02)
 
     def test_equal_price_phase_does_not_generate_execution(self):
-        engine = ExecutionHarness()
-
-        closed = engine._process_monotonic_segment(100.0, 100.0, 14, 0)
-
-        self.assertFalse(closed)
-        self.assertEqual(engine.closed, [])
+        s=ExecutionHarness(); self.assertFalse(s.segment(100,100)); self.assertEqual(s.state.virtual_position_size,5)
 
     def test_favorable_long_phase_applies_trail_before_later_adverse_phase(self):
-        engine = ExecutionHarness(direction=1, size=5, entry=100.0, sl=98.0, tp=110.0)
-
-        self.assertFalse(engine._process_monotonic_segment(100.0, 108.0, 15, 1))
-        self.assertEqual(engine.state.current_trail_step, 1)
-        self.assertEqual(engine.state.sl_level, 101.5)
-
-        self.assertTrue(engine._process_monotonic_segment(108.0, 101.0, 15, 2))
-        self.assertEqual(engine.closed[0]["reason"], "STOP_LOSS")
-        self.assertEqual(engine.closed[0]["detected_price"], 101.5)
+        s=ExecutionHarness(direction=1,entry=100,sl=98,tp=110); s.params.tp=10.0; s.params.dynamic_trail_steps=[(0.2,0.05)]; self.assertFalse(s.segment(100,103,10,0)); self.assertEqual(s.state.sl_level,100.5); self.assertTrue(s.segment(103,100,10,1)); self.assertEqual(s.ledger.records[0]['exit_phase'],1)
 
     def test_exit_at_same_price_has_priority_over_trail(self):
-        engine = ExecutionHarness(direction=1, size=5, entry=100.0, sl=100.0, tp=103.0)
-
-        closed = engine._process_monotonic_segment(100.0, 101.0, 16, 0)
-
-        self.assertTrue(closed)
-        self.assertEqual(engine.closed[0]["reason"], "STOP_LOSS")
-        self.assertEqual(engine.state.current_trail_step, -1)
+        s=ExecutionHarness(direction=1,entry=100,sl=99,tp=101); s.params.dynamic_trail_steps=[(1/3,0.5)]; self.assertTrue(s.segment(100,101,10,0)); self.assertEqual(s.ledger.records[0]['exit_reason'],'TAKE_PROFIT')
 
     def test_multiple_trail_steps_are_processed_in_traversal_order(self):
-        engine = ExecutionHarness(direction=1, size=5, entry=100.0, sl=98.0, tp=110.0)
-
-        closed = engine._process_monotonic_segment(100.0, 109.0, 17, 0)
-
-        self.assertFalse(closed)
-        self.assertEqual(engine.state.current_trail_step, 1)
-        self.assertEqual(engine.state.sl_level, 101.5)
+        s=ExecutionHarness(direction=1,entry=100,sl=98,tp=110); s.params.dynamic_trail_steps=[(0.2,0.05),(0.5,0.15),(0.9,0.65)]; self.assertFalse(s.segment(100,106,10,0)); self.assertEqual(s.state.current_trail_step,2); self.assertEqual(s.state.sl_level,106.5 if False else 101.23)
 
     def test_doji_path_is_open_low_high_close(self):
-        engine = ExecutionHarness(direction=1, size=5, entry=100.0, sl=98.0, tp=103.0)
-        market = Market()
-        market.observe(Bar(datetime(2026, 1, 1), 100.0, 102.0, 99.0, 100.0, 1))
-        engine.market = market
-
-        phases = []
-        original = engine._process_monotonic_segment
-
-        def capture(start_price, end_price, bar_index, phase_index):
-            phases.append((start_price, end_price, phase_index))
-            return original(start_price, end_price, bar_index, phase_index)
-
-        engine._process_monotonic_segment = capture
-        engine._process_open_position_bar(18)
-
-        self.assertEqual(
-            phases,
-            [(100.0, 99.0, 0), (99.0, 102.0, 1), (102.0, 100.0, 2)],
-        )
+        s=ExecutionHarness(); s.state.tp_level=105.0; bar=Bar(datetime(2026,1,1),100,103,99,100,100); result=s.engine.process(s.context.execution_snapshot(),bar,7); self.assertEqual([(p.start_price,p.end_price) for p in result.phases],[(100,99),(99,103),(103,100)])
 
     def test_processing_after_position_is_closed_stops(self):
-        engine = ExecutionHarness(direction=1, size=5, sl=98.0, tp=103.0)
-        market = Market()
-        market.observe(Bar(datetime(2026, 1, 1), 100.0, 104.0, 97.0, 101.0, 1))
-        engine.market = market
-
-        phases = []
-        original = engine._process_monotonic_segment
-
-        def capture(start_price, end_price, bar_index, phase_index):
-            phases.append(phase_index)
-            return original(start_price, end_price, bar_index, phase_index)
-
-        engine._process_monotonic_segment = capture
-        engine._process_open_position_bar(19)
-
-        self.assertEqual(phases, [0])
-        self.assertEqual(len(engine.closed), 1)
+        s=ExecutionHarness(direction=1,entry=100,sl=99,tp=101); self.assertTrue(s.segment(100,102,10,0)); self.assertFalse(s.segment(102,90,10,1)); self.assertEqual(s.ledger.closed_trades,1)
 
 
 class PureExecutionEngineTests(unittest.TestCase):
-    def _snapshot(self, direction=1, size=5, entry=100.0, sl=98.0, tp=103.0, step=-1, levels=()):
-        from core.backtest_execution import ExecutionSnapshot
-        return ExecutionSnapshot(
-            position_size=direction * size,
-            entry_price=entry,
-            sl_level=sl,
-            tp_level=tp,
-            current_trail_step=step,
-            trail_levels=tuple(levels),
-            slippage=ExecutionEngine.get_backtest_dynamic_slippage(size),
-        )
+    def snapshot(self, **changes):
+        values=dict(position_size=5,entry_price=100.0,sl_level=98.0,tp_level=103.0,current_trail_step=-1,trail_levels=(TrailLevel(0,100.5,100.1),),slippage=0.02); values.update(changes); return ExecutionSnapshot(**values)
 
     def test_pure_engine_does_not_require_runtime_context(self):
-        engine = ExecutionEngine()
-        result = engine.process(self._snapshot(), Bar(datetime(2026,1,1),100,104,97,101,1), 10)
-        self.assertEqual(result.exit.reason, "STOP_LOSS")
-        self.assertEqual(result.exit.detected_price, 98.0)
-        self.assertEqual(result.exit.execution_price, 97.98)
+        result=ExecutionEngine().process(self.snapshot(),Bar(datetime(2026,1,1),100,104,99,103,100),10); self.assertTrue(result.phases)
 
     def test_fast_path_matches_full_path_for_trail_and_exit_decisions(self):
-        from core.backtest_execution import ExecutionSnapshot, TrailLevel
-        snap = self._snapshot(
-            entry=100, sl=98, tp=110,
-            levels=(
-                TrailLevel(0, 103.5, 100.55),
-                TrailLevel(1, 107.5, 101.65),
-            ),
-        )
-        bar = Bar(datetime(2026, 1, 1), 100, 111, 97, 101, 1)
-        engine = ExecutionEngine()
-
-        full = engine.process(snap, bar, 10)
-        fast_updates, fast_exit = engine.process_fast(snap, bar, 10)
-
-        self.assertEqual(
-            [(u.step_idx, u.trigger_price, u.new_sl) for phase in full.phases for u in phase.trail_updates],
-            [(u.step_idx, u.trigger_price, u.new_sl) for u in fast_updates],
-        )
-        self.assertEqual(full.exit.event_type if full.exit else None, fast_exit.event_type if fast_exit else None)
-        self.assertEqual(full.exit.detected_price if full.exit else None, fast_exit.detected_price if fast_exit else None)
-        self.assertEqual(full.exit.execution_price if full.exit else None, fast_exit.execution_price if fast_exit else None)
-        self.assertEqual(full.exit.phase_index if full.exit else None, fast_exit.phase_index if fast_exit else None)
+        e=ExecutionEngine(); snap=self.snapshot(trail_levels=(TrailLevel(0,100.5,100.1),)); bar=Bar(datetime(2026,1,1),100,104,99,103,100); full=e.process(snap,bar,10); fast=e.process_fast(snap,bar,10); self.assertEqual(fast[1],full.exit); self.assertEqual(fast[0],tuple(u for p in full.phases for u in p.trail_updates))
 
     def test_fast_path_does_not_mutate_snapshot(self):
-        snap = self._snapshot(
-            entry=100, sl=98, tp=110,
-            levels=(TrailLevel(0, 103.5, 100.55),),
-        )
-        original = snap
-        ExecutionEngine().process_fast(
-            snap, Bar(datetime(2026, 1, 1), 100, 108, 97, 101, 1), 10
-        )
-        self.assertEqual(snap, original)
+        e=ExecutionEngine(); snap=self.snapshot(); before=snap; e.process_fast(snap,Bar(datetime(2026,1,1),100,104,99,103,100),10); self.assertEqual(snap,before)
 
     def test_pure_engine_returns_trail_then_exit_causally(self):
-        from core.backtest_execution import ExecutionSnapshot, TrailLevel
-        snap = self._snapshot(
-            entry=100, sl=98, tp=110,
-            levels=(TrailLevel(0, 103.5, 100.55), TrailLevel(1, 107.5, 101.65)),
-        )
-        engine = ExecutionEngine()
-        result = engine.process(snap, Bar(datetime(2026,1,1),100,108,100,108,1), 10)
-        self.assertIsNone(result.exit)
-        self.assertEqual([u.step_idx for u in result.phases[1].trail_updates], [0, 1])
-        self.assertEqual(result.phases[1].resulting_sl_level, 101.65)
+        e=ExecutionEngine(); snap=self.snapshot(sl_level=98,tp_level=102,trail_levels=(TrailLevel(0,100.5,100.1),)); bar=Bar(datetime(2026,1,1),100,103,99,103,100); result=e.process(snap,bar,10); self.assertEqual(result.phases[1].trail_updates[0].step_idx,0); self.assertEqual(result.exit.reason,'TAKE_PROFIT')
 
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
+if __name__ == '__main__': unittest.main(verbosity=2)

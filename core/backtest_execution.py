@@ -41,10 +41,6 @@ class ExecutionExit:
     reason: str
 
 
-# Backward-compatible public name used by existing callers/tests.
-ExecutionResult = ExecutionExit
-
-
 @dataclass(frozen=True, slots=True)
 class ExecutionPhase:
     """Result of one deterministic monotonic intrabar segment."""
@@ -68,7 +64,7 @@ class ExecutionBarResult:
     exit: ExecutionExit | None = None
 
 
-class ExecutionContext(Protocol):
+class ExecutionHost(Protocol):
     """Narrow host adapter used to feed/apply the execution model."""
 
     def execution_snapshot(self) -> ExecutionSnapshot: ...
@@ -425,88 +421,12 @@ class ExecutionEngine:
 
         return ExecutionBarResult(tuple(phases), None)
 
-    # Compatibility helper for the old mixin/tests. It now operates through a
-    # snapshot and applies only the returned decisions via the host adapter.
-    def _process_monotonic_segment(
-        self,
-        context: ExecutionContext,
-        start_price: float,
-        end_price: float,
-        bar_index: int,
-        phase_index: int,
-        prices_normalized: bool = False,
-        position_size: int | None = None,
-    ) -> ExecutionResult | None:
-        snapshot = context.execution_snapshot()
-        if position_size is not None and position_size != snapshot.position_size:
-            snapshot = ExecutionSnapshot(
-                position_size=position_size,
-                entry_price=snapshot.entry_price,
-                sl_level=snapshot.sl_level,
-                tp_level=snapshot.tp_level,
-                current_trail_step=snapshot.current_trail_step,
-                trail_levels=snapshot.trail_levels,
-                slippage=self.get_backtest_dynamic_slippage(abs(position_size)),
-            )
-        if not prices_normalized:
-            start_price = context.price(start_price)
-            end_price = context.price(end_price)
-        phase = self._process_segment(snapshot, start_price, end_price, bar_index, phase_index)
-        if phase is None:
-            return None
-        for update in phase.trail_updates:
-            context.apply_trail_update(update, update.trigger_price)
-        if phase.exit is not None:
-            context.apply_execution_exit(phase.exit)
-        return phase.exit
-
-    def process_bar(self, context: ExecutionContext, bar: Bar, bar_index: int, segment_processor=None):
-        """Process a bar and apply decisions through the narrow host adapter."""
+    def process_bar(self, context: ExecutionHost, bar: Bar, bar_index: int):
+        """Process one bar and apply decisions through the explicit Native host."""
         snapshot = context.execution_snapshot()
         if not snapshot.position_size:
             return None
 
-        if segment_processor is not None:
-            # Preserve the legacy test/adapter hook. Production code does not
-            # use it; the native path goes through the pure ``process`` API.
-            for phase_index in range(3):
-                current = context.execution_snapshot()
-                if not current.position_size:
-                    break
-                points = (bar.open, bar.low, bar.high, bar.close) if bar.close >= bar.open else (bar.open, bar.high, bar.low, bar.close)
-                start_price, end_price = points[phase_index], points[phase_index + 1]
-                if context.debug_enabled:
-                    context.debug_event(
-                        "INTRABAR_PHASE", trade_id=context.trade_id, bar_index=bar_index,
-                        phase_index=phase_index, start_price=context.price(start_price),
-                        end_price=context.price(end_price),
-                        direction="UP" if end_price > start_price else ("DOWN" if end_price < start_price else "FLAT"),
-                        entry_price=current.entry_price, tp_level=current.tp_level,
-                        sl_level=current.sl_level, current_trail_step=current.current_trail_step,
-                    )
-                closed = segment_processor(start_price, end_price, bar_index, phase_index)
-                current = context.execution_snapshot()
-                if context.debug_enabled:
-                    context.debug_event(
-                        "TRAIL_EVALUATION", trade_id=context.trade_id, bar_index=bar_index,
-                        phase_index=phase_index, position_size=current.position_size,
-                        start_price=context.price(start_price), end_price=context.price(end_price),
-                        entry_price=current.entry_price, tp_level=current.tp_level, sl_level=current.sl_level,
-                        current_trail_step=current.current_trail_step,
-                    )
-                    context.debug_event(
-                        "EXIT_EVALUATION", trade_id=context.trade_id, bar_index=bar_index,
-                        phase_index=phase_index, position_size=current.position_size,
-                        start_price=context.price(start_price), end_price=context.price(end_price),
-                        tp_level=current.tp_level, sl_level=current.sl_level, closed=bool(closed),
-                    )
-                if closed:
-                    return True
-            return None
-
-        # NONE/FAST are the production hot path. DIAGNOSTIC keeps the full
-        # phase objects because their fields are part of the established log
-        # contract.
         debug_enabled = context.debug_enabled
         if not debug_enabled:
             updates, exit_result = self.process_fast(snapshot, bar, bar_index)
@@ -518,22 +438,21 @@ class ExecutionEngine:
 
         result = self.process(snapshot, bar, bar_index)
         for phase in result.phases:
-            if debug_enabled:
-                context.debug_event(
-                    "INTRABAR_PHASE",
-                    trade_id=context.trade_id,
-                    bar_index=bar_index,
-                    phase_index=phase.phase_index,
-                    start_price=phase.start_price,
-                    end_price=phase.end_price,
-                    direction="UP" if phase.end_price > phase.start_price else (
-                        "DOWN" if phase.end_price < phase.start_price else "FLAT"
-                    ),
-                    entry_price=snapshot.entry_price,
-                    tp_level=snapshot.tp_level,
-                    sl_level=phase.sl_level,
-                    current_trail_step=phase.trail_step,
-                )
+            context.debug_event(
+                "INTRABAR_PHASE",
+                trade_id=context.trade_id,
+                bar_index=bar_index,
+                phase_index=phase.phase_index,
+                start_price=phase.start_price,
+                end_price=phase.end_price,
+                direction="UP" if phase.end_price > phase.start_price else (
+                    "DOWN" if phase.end_price < phase.start_price else "FLAT"
+                ),
+                entry_price=snapshot.entry_price,
+                tp_level=snapshot.tp_level,
+                sl_level=phase.sl_level,
+                current_trail_step=phase.trail_step,
+            )
 
             for update in phase.trail_updates:
                 context.apply_trail_update(update, update.trigger_price)
@@ -541,53 +460,71 @@ class ExecutionEngine:
             if phase.exit is not None:
                 context.apply_execution_exit(phase.exit)
 
-            if debug_enabled:
-                context.debug_event(
-                    "TRAIL_EVALUATION",
-                    trade_id=context.trade_id,
-                    bar_index=bar_index,
-                    phase_index=phase.phase_index,
-                    position_size=context.execution_snapshot().position_size,
-                    start_price=phase.start_price,
-                    end_price=phase.end_price,
-                    entry_price=context.execution_snapshot().entry_price,
-                    tp_level=context.execution_snapshot().tp_level,
-                    sl_level=context.execution_snapshot().sl_level,
-                    current_trail_step=context.execution_snapshot().current_trail_step,
-                )
-                context.debug_event(
-                    "EXIT_EVALUATION",
-                    trade_id=context.trade_id,
-                    bar_index=bar_index,
-                    phase_index=phase.phase_index,
-                    position_size=context.execution_snapshot().position_size,
-                    start_price=phase.start_price,
-                    end_price=phase.end_price,
-                    tp_level=context.execution_snapshot().tp_level,
-                    sl_level=context.execution_snapshot().sl_level,
-                    closed=phase.exit is not None,
-                )
+            context.debug_event(
+                "TRAIL_EVALUATION",
+                trade_id=context.trade_id,
+                bar_index=bar_index,
+                phase_index=phase.phase_index,
+                position_size=context.execution_snapshot().position_size,
+                start_price=phase.start_price,
+                end_price=phase.end_price,
+                entry_price=context.execution_snapshot().entry_price,
+                tp_level=context.execution_snapshot().tp_level,
+                sl_level=context.execution_snapshot().sl_level,
+                current_trail_step=context.execution_snapshot().current_trail_step,
+            )
+            context.debug_event(
+                "EXIT_EVALUATION",
+                trade_id=context.trade_id,
+                bar_index=bar_index,
+                phase_index=phase.phase_index,
+                position_size=context.execution_snapshot().position_size,
+                start_price=phase.start_price,
+                end_price=phase.end_price,
+                tp_level=context.execution_snapshot().tp_level,
+                sl_level=context.execution_snapshot().sl_level,
+                closed=phase.exit is not None,
+            )
             if phase.exit is not None:
                 return phase.exit
         return None
 
 
-class BacktestExecutionContext:
-    """Production adapter between the pure execution model and runtime state."""
+class NativeExecutionContext:
+    """Explicit Native adapter between ExecutionEngine and runtime services."""
 
-    def __init__(self, strategy) -> None:
-        self._strategy = strategy
+    def __init__(
+        self,
+        *,
+        state,
+        market,
+        ledger,
+        trailing,
+        trade_accounting,
+        logger,
+        price_fn,
+    ) -> None:
+        self.state = state
+        self.market = market
+        self.ledger = ledger
+        self.trailing = trailing
+        self.trade_accounting = trade_accounting
+        self.logger = logger
+        self._price = price_fn
+        self._execution_trail_cache_entry = None
+        self._execution_trail_cache_direction = None
+        self._execution_trail_cache_levels = None
 
     def execution_snapshot(self) -> ExecutionSnapshot:
         position_size = self.position_size
         direction = 1 if position_size > 0 else -1
         entry_price = self.entry_price
-        cache_entry = getattr(self, "_execution_trail_cache_entry", None)
-        cache_direction = getattr(self, "_execution_trail_cache_direction", None)
-        cached_levels = getattr(self, "_execution_trail_cache_levels", None)
+        cache_entry = self._execution_trail_cache_entry
+        cache_direction = self._execution_trail_cache_direction
+        cached_levels = self._execution_trail_cache_levels
 
         if cached_levels is None or cache_entry != entry_price or cache_direction != direction:
-            raw_levels = self._strategy._trail_trigger_levels(direction)
+            raw_levels = self.trailing.trigger_levels(direction)
             cached_levels = tuple(
                 TrailLevel(step_idx, trigger, new_sl)
                 for step_idx, trigger, new_sl in raw_levels
@@ -608,36 +545,36 @@ class BacktestExecutionContext:
 
     @property
     def position_size(self) -> int:
-        return self._strategy.state.virtual_position_size
+        return self.state.virtual_position_size
 
     @property
     def entry_price(self) -> float | None:
-        return self._strategy.state.virtual_entry_price
+        return self.state.virtual_entry_price
 
     @property
     def sl_level(self) -> float | None:
-        return self._strategy.state.sl_level
+        return self.state.sl_level
 
     @property
     def tp_level(self) -> float | None:
-        return self._strategy.state.tp_level
+        return self.state.tp_level
 
     @property
     def trade_id(self) -> int:
-        return self._strategy._ensure_trade_ledger().trade_id
+        return self.ledger.trade_id
 
     @property
     def current_trail_step(self) -> int:
-        return self._strategy.state.current_trail_step
+        return self.state.current_trail_step
 
     def price(self, value: float) -> float:
-        return self._strategy._price(value)
+        return self._price(value)
 
     def apply_trail_update(self, update: TrailLevel, current_price: float) -> None:
-        self._strategy._apply_trail_step(update.step_idx, update.new_sl, current_price)
+        self.trailing.apply_step(update.step_idx, update.new_sl, current_price)
 
     def apply_execution_exit(self, result: ExecutionExit) -> None:
-        logger = self._strategy.logger
+        logger = self.logger
         if logger.wants_debug_event("EXIT_CROSSING"):
             logger.debug_event(
                 "EXIT_CROSSING",
@@ -650,67 +587,84 @@ class BacktestExecutionContext:
                 tp_level=self.tp_level,
                 slippage=result.slippage,
             )
-        self._strategy._close_virtual_position(
-            reason=result.reason,
-            target_exec_price=result.execution_price,
-            detected_price=result.detected_price,
-            bar_index=result.bar_index,
-            phase_index=result.phase_index,
+
+        transaction = self.trade_accounting
+        close_result = transaction.close(
+            result.reason,
+            result.execution_price,
+            result.bar_index,
+            result.phase_index,
         )
+        trade_id = close_result["trade_id"]
+        direction = close_result["direction"]
+        size = close_result["size"]
+        entry_price = close_result["entry_price"]
+        entry_commission = close_result["entry_commission"]
+        exit_price = close_result["exit_price"]
+        exit_commission = close_result["exit_commission"]
+        gross_pnl = close_result["gross_pnl"]
+        net_trade_pnl = close_result["net_pnl"]
+        reason = result.reason
+        detected_price = result.detected_price
+
+        if logger.wants_trade():
+            logger.trade(
+                f"EXIT_SIGNAL trade_id = {trade_id}; reason = {reason}; "
+                f"bar_index = {result.bar_index}; phase_index = {result.phase_index}; "
+                f"detected_price = {detected_price}; "
+                f"level = {self.state.sl_level if reason == 'STOP_LOSS' else self.state.tp_level}; "
+                f"execution_model = VIRTUAL_INTRABAR; target_exec_price = {exit_price}"
+            )
+        if logger.wants_trade():
+            logger.trade(
+                f"EXIT_EXECUTED trade_id = {trade_id}; reason = {reason}; "
+                f"execution_model = VIRTUAL_INTRABAR; broker_executed_price = None; "
+                f"execution_price = {exit_price}; target_exec_price = {exit_price}; "
+                f"exit_slippage = {result.slippage}; "
+                f"executed_size = {size}; exit_commission = {exit_commission}"
+            )
+        if logger.wants_trade():
+            logger.trade(
+                f"TRADE_CLOSED trade_id = {trade_id}; direction = {direction}; "
+                f"size = {size}; entry_price = {entry_price}; "
+                f"exit_price = {exit_price}; gross_pnl = {gross_pnl}; "
+                f"entry_commission = {entry_commission}; "
+                f"exit_commission = {exit_commission}; net_pnl = {net_trade_pnl}; "
+                f"reason = {reason}; execution_model = VIRTUAL"
+            )
+        if logger.wants_debug_event("TRADE_UPDATE"):
+            logger.debug_event(
+                "TRADE_UPDATE",
+                trade_id=trade_id,
+                status="CLOSED",
+                direction=direction,
+                size=size,
+                entry_price=entry_price,
+                exit_price=exit_price,
+                commission=self._money(entry_commission + exit_commission),
+                pnl=gross_pnl,
+                pnl_comm=net_trade_pnl,
+                bar_index=result.bar_index,
+                phase_index=result.phase_index,
+                datetime=self.market.current_bar.datetime if self.market.current_bar else None,
+            )
+
+        transaction.reset_position()
 
     @property
     def debug_enabled(self) -> bool:
-        logger = self._strategy.logger
-        is_diagnostic = getattr(logger, "is_diagnostic", None)
+        is_diagnostic = getattr(self.logger, "is_diagnostic", None)
         if is_diagnostic is not None:
             return bool(is_diagnostic)
-        return logger.wants_debug_event("BAR")
+        return self.logger.wants_debug_event("BAR")
 
     def wants_debug_event(self, event_name: str) -> bool:
-        return self._strategy.logger.wants_debug_event(event_name)
+        return self.logger.wants_debug_event(event_name)
 
     def debug_event(self, event_name: str, **kwargs) -> None:
-        self._strategy.logger.debug_event(event_name, **kwargs)
+        self.logger.debug_event(event_name, **kwargs)
 
-
-class BacktestExecutionMixin:
-    """Compatibility layer delegating execution to ExecutionEngine."""
-
-    def _get_execution_engine(self) -> ExecutionEngine:
-        engine = getattr(self, "_execution_engine", None)
-        if engine is None:
-            engine = ExecutionEngine()
-            self._execution_engine = engine
-        return engine
-
-    def _get_execution_context(self) -> BacktestExecutionContext:
-        context = getattr(self, "_execution_context", None)
-        if context is None:
-            context = BacktestExecutionContext(self)
-            self._execution_context = context
-        return context
-
-    def get_backtest_dynamic_slippage(self, size: int) -> float:
-        return ExecutionEngine.get_backtest_dynamic_slippage(size)
-
-    def _process_monotonic_segment(self, start_price: float, end_price: float, bar_index: int, phase_index: int) -> bool:
-        result = self._get_execution_engine()._process_monotonic_segment(
-            context=self._get_execution_context(),
-            start_price=start_price,
-            end_price=end_price,
-            bar_index=bar_index,
-            phase_index=phase_index,
-        )
-        return result is not None
-
-    def _process_open_position_bar(self, bar_index: int):
-        market = getattr(self, "market", None)
-        bar = market.current_bar if market is not None else None
-        if bar is None:
-            raise RuntimeError("Market.current_bar is required to process a position bar")
-        return self._get_execution_engine().process_bar(
-            context=self._get_execution_context(),
-            bar=bar,
-            bar_index=bar_index,
-            segment_processor=self._process_monotonic_segment,
-        )
+    def _money(self, value: float) -> float:
+        # Only used for the TRADE_UPDATE diagnostic field; the runtime's
+        # precision function is intentionally kept as a direct bound method.
+        return round(float(value), self.trade_accounting.params.precision_money)

@@ -12,7 +12,7 @@ core_pkg.__path__ = [os.path.join(os.path.dirname(__file__), "..", "core")]
 sys.modules.setdefault("core", core_pkg)
 
 from core.backtest_bar import Bar
-from core.backtest_signal import EntryIntent, SignalEngine, SignalInput, SignalIntent
+from core.backtest_signal import SignalEngine, SignalInput, SignalIntent
 
 
 @dataclass
@@ -45,7 +45,7 @@ class SignalEngineTests(unittest.TestCase):
         return Bar(self.dt, o, h, l, c, volume)
 
     def test_entry_intent_is_immutable(self):
-        intent = EntryIntent(1, 4, 7)
+        intent = SignalIntent(1, 4, 7)
         with self.assertRaises(Exception):
             intent.size = 5
 
@@ -163,16 +163,8 @@ class SignalInputContractTests(unittest.TestCase):
         )
         self.assertEqual(new, fast)
 
-    def test_legacy_evaluate_matches_new_boundary(self):
+    def test_evaluate_input_is_the_explicit_signal_boundary(self):
         previous = self.bar(100.0, 101.0, 100.0, 100.5)
         current = self.bar(100.5, 101.0, 100.0, 100.2)
-        from core.backtest_signal import SignalInput
-        new = self.engine.evaluate_input(SignalInput(current, previous, 2, 0, 264000.0))
-        legacy = self.engine.evaluate(
-            current_bar=current,
-            previous_bar=previous,
-            bar_index=2,
-            position_size=0,
-            virtual_cash=264000.0,
-        )
-        self.assertEqual(new, legacy)
+        result = self.engine.evaluate_input(SignalInput(current, previous, 2, 0, 264000.0))
+        self.assertEqual(result, self.engine.evaluate_fast(current, previous, 2, 0, 264000.0))

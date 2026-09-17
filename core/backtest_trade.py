@@ -13,12 +13,12 @@ class TradeAccountingEngine:
     responsibility of the accounting layer.
     """
 
-    def __init__(self, runtime) -> None:
-        self.state = runtime.state
-        self.params = runtime.params
-        self._price = runtime._price
-        self.accounting = runtime._ensure_accounting_engine()
-        self.ledger = runtime._ensure_trade_ledger()
+    def __init__(self, *, state, params, accounting, ledger, price_fn) -> None:
+        self.state = state
+        self.params = params
+        self._price = price_fn
+        self.accounting = accounting
+        self.ledger = ledger
 
     def open(
         self,
@@ -124,121 +124,3 @@ class TradeAccountingEngine:
         state.virtual_entry_commission = 0.0
         state.current_trail_step = -1
 
-
-class BacktestTradeMixin:
-    """Compatibility/orchestration facade for virtual trade lifecycle."""
-
-    def _ensure_trade_ledger(self) -> TradeLedger:
-        if not hasattr(self, "_trade_ledger"):
-            self._trade_ledger = TradeLedger()
-        return self._trade_ledger
-
-    def _ensure_trade_accounting_engine(self) -> TradeAccountingEngine:
-        if not hasattr(self, "_trade_accounting_engine"):
-            self._trade_accounting_engine = TradeAccountingEngine(self)
-        return self._trade_accounting_engine
-
-    def _open_virtual_position(self, signal: int, size: int, bar_index: int):
-        current_bar = self.market.current_bar
-        if current_bar is None:
-            raise RuntimeError("Market.current_bar is required to open a virtual position")
-
-        transaction = self._ensure_trade_accounting_engine()
-        record = transaction.open(signal, size, bar_index, current_bar)
-        trade_id = record["trade_id"]
-        direction = record["direction"]
-        entry_price = record["entry_price"]
-        commission = record["entry_commission"]
-
-        if self.logger.wants_trade():
-            self.logger.trade(
-                f"ENTRY_SIGNAL trade_id = {trade_id}; "
-                f"bar_index = {bar_index}; signal = {signal}; dynamic_size = {size}; "
-                f"execution_model = VIRTUAL_OPEN; entry_price = {entry_price}; "
-                f"entry_slippage = 0.0; commission = {commission}"
-            )
-        if self.logger.wants_debug_event("ORDER_SUBMITTED"):
-            self.logger.debug_event(
-                "ORDER_SUBMITTED",
-                trade_id=trade_id,
-                bar_index=bar_index,
-                signal=signal,
-                order_ref=None,
-                order_type="VIRTUAL_OPEN",
-                requested_size=size,
-                reference_open=current_bar.open,
-                execution_price=entry_price,
-                dynamic_slip=0.0,
-                execution_model="VIRTUAL",
-            )
-        if self.logger.wants_trade():
-            self.logger.trade(
-                f"ENTRY_EXECUTED trade_id = {trade_id}; direction = {direction}; "
-                f"execution_model = VIRTUAL_OPEN; execution_price = {entry_price}; "
-                f"executed_size = {size}; entry_commission = {commission}; "
-                f"tp_level = {self.state.tp_level}; sl_level = {self.state.sl_level}"
-            )
-
-    def _close_virtual_position(
-        self,
-        reason: str,
-        target_exec_price: float,
-        detected_price: float,
-        bar_index: int,
-        phase_index: int,
-    ):
-        transaction = self._ensure_trade_accounting_engine()
-        result = transaction.close(reason, target_exec_price, bar_index, phase_index)
-        trade_id = result["trade_id"]
-        direction = result["direction"]
-        size = result["size"]
-        entry_price = result["entry_price"]
-        entry_commission = result["entry_commission"]
-        exit_price = result["exit_price"]
-        exit_commission = result["exit_commission"]
-        gross_pnl = result["gross_pnl"]
-        net_trade_pnl = result["net_pnl"]
-
-        if self.logger.wants_trade():
-            self.logger.trade(
-                f"EXIT_SIGNAL trade_id = {trade_id}; reason = {reason}; "
-                f"bar_index = {bar_index}; phase_index = {phase_index}; "
-                f"detected_price = {detected_price}; "
-                f"level = {self.state.sl_level if reason == 'STOP_LOSS' else self.state.tp_level}; "
-                f"execution_model = VIRTUAL_INTRABAR; target_exec_price = {exit_price}"
-            )
-        if self.logger.wants_trade():
-            self.logger.trade(
-                f"EXIT_EXECUTED trade_id = {trade_id}; reason = {reason}; "
-                f"execution_model = VIRTUAL_INTRABAR; broker_executed_price = None; "
-                f"execution_price = {exit_price}; target_exec_price = {exit_price}; "
-                f"exit_slippage = {self._execution_engine.get_backtest_dynamic_slippage(size)}; "
-                f"executed_size = {size}; exit_commission = {exit_commission}"
-            )
-        if self.logger.wants_trade():
-            self.logger.trade(
-                f"TRADE_CLOSED trade_id = {trade_id}; direction = {direction}; "
-                f"size = {size}; entry_price = {entry_price}; "
-                f"exit_price = {exit_price}; gross_pnl = {gross_pnl}; "
-                f"entry_commission = {entry_commission}; "
-                f"exit_commission = {exit_commission}; net_pnl = {net_trade_pnl}; "
-                f"reason = {reason}; execution_model = VIRTUAL"
-            )
-        if self.logger.wants_debug_event("TRADE_UPDATE"):
-            self.logger.debug_event(
-                "TRADE_UPDATE",
-                trade_id=trade_id,
-                status="CLOSED",
-                direction=direction,
-                size=size,
-                entry_price=entry_price,
-                exit_price=exit_price,
-                commission=self._money(entry_commission + exit_commission),
-                pnl=gross_pnl,
-                pnl_comm=net_trade_pnl,
-                bar_index=bar_index,
-                phase_index=phase_index,
-                datetime=self.market.current_bar.datetime if self.market.current_bar else None,
-            )
-
-        transaction.reset_position()

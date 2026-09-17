@@ -143,3 +143,4 @@ def dataframe_to_bars(df) -> list[Bar]:
         )
         for row in df.itertuples(index=False)
     ]
+

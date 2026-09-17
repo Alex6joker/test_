@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 
-class BacktestNumericMixin:
-    """Numeric normalization helpers shared by all backtest functional blocks."""
+def money(value: float, precision: int) -> float:
+    """Normalize a monetary value using the configured precision."""
+    return round(float(value), precision)
 
-    def _money(self, value: float) -> float:
-        return round(float(value), self.params.precision_money)
 
-    def _price(self, value: float) -> float:
-        return round(float(value), self.params.precision_num)
+def price(value: float, precision: int) -> float:
+    """Normalize a market price using the configured precision."""
+    return round(float(value), precision)

@@ -105,6 +105,21 @@ class ExecutionEngine:
         return 0.15
 
     @staticmethod
+    def _make_exit(
+        *, event_type: str, bar_index: int, phase_index: int, direction: int,
+        size: int, detected_price: float, target_price: float, slippage: float,
+    ) -> ExecutionExit:
+        if direction > 0:
+            target_exec_price = target_price - slippage
+        else:
+            target_exec_price = target_price + slippage
+        return ExecutionExit(
+            event_type=event_type, bar_index=bar_index, phase_index=phase_index,
+            direction=direction, size=size, detected_price=detected_price,
+            execution_price=target_exec_price, slippage=slippage, reason=event_type,
+        )
+
+    @staticmethod
     def _process_segment(
         snapshot: ExecutionSnapshot,
         start_price: float,
@@ -134,7 +149,7 @@ class ExecutionEngine:
 
         if current_sl is not None:
             if direction > 0:
-                if not moving_up and end_price <= current_sl < start_price:
+                if not moving_up and end_price <= current_sl <= start_price:
                     events.append(("STOP_LOSS", current_sl, None))
                 elif moving_up and start_price <= current_sl <= end_price:
                     events.append(("STOP_LOSS", current_sl, None))
@@ -151,9 +166,9 @@ class ExecutionEngine:
                 events.append(("TAKE_PROFIT", tp_level, None))
 
         if moving_up:
-            events.sort(key=lambda e: (e[1], 0 if e[0] != "TRAIL" else 1))
+            events.sort(key=lambda e: (e[1], 0 if e[0] == "STOP_LOSS" else (1 if e[0] == "TAKE_PROFIT" else 2)))
         else:
-            events.sort(key=lambda e: (-e[1], 0 if e[0] != "TRAIL" else 1))
+            events.sort(key=lambda e: (-e[1], 0 if e[0] == "STOP_LOSS" else (1 if e[0] == "TAKE_PROFIT" else 2)))
 
         current_price = start_price
         trail_updates = []
@@ -191,21 +206,10 @@ class ExecutionEngine:
             if target is None:
                 continue
 
-            if direction > 0:
-                target_exec_price = target - slippage
-            else:
-                target_exec_price = target + slippage
-
-            exit_result = ExecutionExit(
-                event_type=event_type,
-                bar_index=bar_index,
-                phase_index=phase_index,
-                direction=direction,
-                size=size,
-                detected_price=current_price,
-                execution_price=target_exec_price,
-                slippage=slippage,
-                reason=event_type,
+            exit_result = ExecutionEngine._make_exit(
+                event_type=event_type, bar_index=bar_index, phase_index=phase_index,
+                direction=direction, size=size, detected_price=current_price,
+                target_price=target, slippage=slippage,
             )
             break
 
@@ -223,53 +227,55 @@ class ExecutionEngine:
 
     @staticmethod
     def _process_segment_fast(
-        snapshot: ExecutionSnapshot,
+        position_size: int,
+        sl_level: float | None,
+        tp_level: float | None,
+        current_step: int,
+        trail_levels: tuple[TrailLevel, ...],
+        slippage: float,
         start_price: float,
         end_price: float,
         bar_index: int,
         phase_index: int,
-    ) -> tuple[tuple[TrailLevel, ...], ExecutionExit | None, float | None, int]:
+    ) -> tuple[tuple[TrailLevel, ...], ExecutionExit | None, float | None, int, bool]:
         """Hot-path segment evaluator without diagnostic phase allocation."""
-        position_size = snapshot.position_size
         if not position_size or start_price == end_price:
-            return (), None, snapshot.sl_level, snapshot.current_trail_step
+            return (), None, sl_level, current_step, False
 
         direction = 1 if position_size > 0 else -1
         moving_up = end_price > start_price
-        current_sl = snapshot.sl_level
-        current_step = snapshot.current_trail_step
-        tp_level = snapshot.tp_level
+        state_changed = False
 
         # Keep the same event ordering as _process_segment, but only allocate
         # the tiny candidate list when a segment actually crosses something.
         candidates = []
         if direction > 0:
             if moving_up:
-                for level in snapshot.trail_levels:
+                for level in trail_levels:
                     if start_price < level.trigger_price <= end_price:
-                        candidates.append((level.trigger_price, 1, level))
-                if current_sl is not None and start_price <= current_sl <= end_price:
-                    candidates.append((current_sl, 0, None))
+                        candidates.append((level.trigger_price, 2, level))
+                if sl_level is not None and start_price <= sl_level <= end_price:
+                    candidates.append((sl_level, 0, None))
                 if tp_level is not None and start_price <= tp_level <= end_price:
-                    candidates.append((tp_level, 0, None))
+                    candidates.append((tp_level, 1, None))
             else:
-                if current_sl is not None and end_price <= current_sl < start_price:
-                    candidates.append((current_sl, 0, None))
+                if sl_level is not None and end_price <= sl_level <= start_price:
+                    candidates.append((sl_level, 0, None))
         else:
             if moving_up:
-                if current_sl is not None and start_price <= current_sl <= end_price:
-                    candidates.append((current_sl, 0, None))
+                if sl_level is not None and start_price <= sl_level <= end_price:
+                    candidates.append((sl_level, 0, None))
             else:
-                for level in snapshot.trail_levels:
+                for level in trail_levels:
                     if end_price <= level.trigger_price < start_price:
-                        candidates.append((level.trigger_price, 1, level))
-                if current_sl is not None and end_price <= current_sl <= start_price:
-                    candidates.append((current_sl, 0, None))
+                        candidates.append((level.trigger_price, 2, level))
+                if sl_level is not None and end_price <= sl_level <= start_price:
+                    candidates.append((sl_level, 0, None))
                 if tp_level is not None and end_price <= tp_level <= start_price:
-                    candidates.append((tp_level, 0, None))
+                    candidates.append((tp_level, 1, None))
 
         if not candidates:
-            return (), None, current_sl, current_step
+            return (), None, sl_level, current_step, False
 
         if moving_up:
             candidates.sort(key=lambda e: (e[0], e[1]))
@@ -278,7 +284,6 @@ class ExecutionEngine:
 
         current_price = start_price
         trail_updates = []
-        slippage = snapshot.slippage
 
         for event_price, event_kind, level in candidates:
             if moving_up and event_price < current_price:
@@ -287,48 +292,44 @@ class ExecutionEngine:
                 continue
             current_price = event_price
 
-            if event_kind == 1:
+            if event_kind == 2:
                 if direction > 0:
-                    if current_sl is not None and level.new_sl <= current_sl:
-                        current_step = max(current_step, level.step_idx)
+                    if sl_level is not None and level.new_sl <= sl_level:
+                        new_step = max(current_step, level.step_idx)
+                        if new_step != current_step:
+                            current_step = new_step
+                            state_changed = True
                         continue
                 else:
-                    if current_sl is not None and level.new_sl >= current_sl:
-                        current_step = max(current_step, level.step_idx)
+                    if sl_level is not None and level.new_sl >= sl_level:
+                        new_step = max(current_step, level.step_idx)
+                        if new_step != current_step:
+                            current_step = new_step
+                            state_changed = True
                         continue
-                current_sl = level.new_sl
+                sl_level = level.new_sl
                 current_step = level.step_idx
+                state_changed = True
                 trail_updates.append(level)
                 continue
 
-            # Both SL and TP candidates have kind 0. Re-identify the crossed
-            # level using the same conditions as _process_segment.
-            is_sl = current_sl is not None and event_price == current_sl
-            is_tp = tp_level is not None and event_price == tp_level
-            if not (is_sl or is_tp):
+            if event_kind == 0:
+                event_type = "STOP_LOSS"
+                target = sl_level
+            else:
+                event_type = "TAKE_PROFIT"
+                target = tp_level
+            if target is None:
                 continue
 
-            event_type = "STOP_LOSS" if is_sl else "TAKE_PROFIT"
-            target = current_sl if is_sl else tp_level
-            if direction > 0:
-                target_exec_price = target - slippage
-            else:
-                target_exec_price = target + slippage
-
-            exit_result = ExecutionExit(
-                event_type=event_type,
-                bar_index=bar_index,
-                phase_index=phase_index,
-                direction=direction,
-                size=abs(position_size),
-                detected_price=current_price,
-                execution_price=target_exec_price,
-                slippage=slippage,
-                reason=event_type,
+            exit_result = ExecutionEngine._make_exit(
+                event_type=event_type, bar_index=bar_index, phase_index=phase_index,
+                direction=direction, size=abs(position_size),
+                detected_price=current_price, target_price=target, slippage=slippage,
             )
-            return tuple(trail_updates), exit_result, current_sl, current_step
+            return tuple(trail_updates), exit_result, sl_level, current_step, True
 
-        return tuple(trail_updates), None, current_sl, current_step
+        return tuple(trail_updates), None, sl_level, current_step, state_changed
 
     def process_fast(self, snapshot: ExecutionSnapshot, bar: Bar, bar_index: int) -> tuple[tuple[TrailLevel, ...], ExecutionExit | None]:
         """Hot execution path for non-diagnostic modes.
@@ -340,6 +341,33 @@ class ExecutionEngine:
             return (), None
 
         b_open = bar.open
+        if snapshot.position_size > 0:
+            if snapshot.sl_level is not None and b_open < snapshot.sl_level:
+                return (), ExecutionEngine._make_exit(
+                    event_type="STOP_LOSS", bar_index=bar_index, phase_index=0,
+                    direction=1, size=snapshot.position_size, detected_price=b_open,
+                    target_price=b_open, slippage=snapshot.slippage,
+                )
+            if snapshot.tp_level is not None and b_open > snapshot.tp_level:
+                return (), ExecutionEngine._make_exit(
+                    event_type="TAKE_PROFIT", bar_index=bar_index, phase_index=0,
+                    direction=1, size=snapshot.position_size, detected_price=b_open,
+                    target_price=b_open, slippage=snapshot.slippage,
+                )
+        else:
+            if snapshot.sl_level is not None and b_open > snapshot.sl_level:
+                return (), ExecutionEngine._make_exit(
+                    event_type="STOP_LOSS", bar_index=bar_index, phase_index=0,
+                    direction=-1, size=-snapshot.position_size, detected_price=b_open,
+                    target_price=b_open, slippage=snapshot.slippage,
+                )
+            if snapshot.tp_level is not None and b_open < snapshot.tp_level:
+                return (), ExecutionEngine._make_exit(
+                    event_type="TAKE_PROFIT", bar_index=bar_index, phase_index=0,
+                    direction=-1, size=-snapshot.position_size, detected_price=b_open,
+                    target_price=b_open, slippage=snapshot.slippage,
+                )
+
         b_high = bar.high
         b_low = bar.low
         b_close = bar.close
@@ -348,23 +376,20 @@ class ExecutionEngine:
         else:
             p0, p1, p2, p3 = b_open, b_high, b_low, b_close
 
-        working = snapshot
+        position_size = snapshot.position_size
+        sl_level = snapshot.sl_level
+        tp_level = snapshot.tp_level
+        current_step = snapshot.current_trail_step
+        trail_levels = snapshot.trail_levels
+        slippage = snapshot.slippage
         all_updates = []
         for phase_index, (start_price, end_price) in enumerate(((p0, p1), (p1, p2), (p2, p3))):
-            updates, exit_result, resulting_sl, resulting_step = self._process_segment_fast(
-                working, start_price, end_price, bar_index, phase_index
+            updates, exit_result, sl_level, current_step, state_changed = self._process_segment_fast(
+                position_size, sl_level, tp_level, current_step, trail_levels, slippage,
+                start_price, end_price, bar_index, phase_index
             )
             if updates:
                 all_updates.extend(updates)
-                working = ExecutionSnapshot(
-                    position_size=working.position_size,
-                    entry_price=working.entry_price,
-                    sl_level=resulting_sl,
-                    tp_level=working.tp_level,
-                    current_trail_step=resulting_step,
-                    trail_levels=working.trail_levels,
-                    slippage=working.slippage,
-                )
             if exit_result is not None:
                 return tuple(all_updates), exit_result
 
@@ -376,6 +401,32 @@ class ExecutionEngine:
             return ExecutionBarResult(())
 
         b_open = bar.open
+        direction = 1 if snapshot.position_size > 0 else -1
+        gap_type = None
+        if direction > 0:
+            if snapshot.sl_level is not None and b_open < snapshot.sl_level:
+                gap_type = "STOP_LOSS"
+            elif snapshot.tp_level is not None and b_open > snapshot.tp_level:
+                gap_type = "TAKE_PROFIT"
+        else:
+            if snapshot.sl_level is not None and b_open > snapshot.sl_level:
+                gap_type = "STOP_LOSS"
+            elif snapshot.tp_level is not None and b_open < snapshot.tp_level:
+                gap_type = "TAKE_PROFIT"
+        if gap_type is not None:
+            gap_exit = ExecutionEngine._make_exit(
+                event_type=gap_type, bar_index=bar_index, phase_index=0,
+                direction=direction, size=abs(snapshot.position_size),
+                detected_price=b_open, target_price=b_open, slippage=snapshot.slippage,
+            )
+            gap_phase = ExecutionPhase(
+                0, b_open, b_open, sl_level=snapshot.sl_level,
+                trail_step=snapshot.current_trail_step, exit=gap_exit,
+                resulting_sl_level=snapshot.sl_level,
+                resulting_trail_step=snapshot.current_trail_step,
+            )
+            return ExecutionBarResult((gap_phase,), gap_exit)
+
         b_high = bar.high
         b_low = bar.low
         b_close = bar.close
@@ -516,9 +567,10 @@ class NativeExecutionContext:
         self._execution_trail_cache_levels = None
 
     def execution_snapshot(self) -> ExecutionSnapshot:
-        position_size = self.position_size
+        state = self.state
+        position_size = state.virtual_position_size
         direction = 1 if position_size > 0 else -1
-        entry_price = self.entry_price
+        entry_price = state.virtual_entry_price
         cache_entry = self._execution_trail_cache_entry
         cache_direction = self._execution_trail_cache_direction
         cached_levels = self._execution_trail_cache_levels
@@ -536,9 +588,9 @@ class NativeExecutionContext:
         return ExecutionSnapshot(
             position_size=position_size,
             entry_price=entry_price,
-            sl_level=self.sl_level,
-            tp_level=self.tp_level,
-            current_trail_step=self.current_trail_step,
+            sl_level=state.sl_level,
+            tp_level=state.tp_level,
+            current_trail_step=state.current_trail_step,
             trail_levels=cached_levels,
             slippage=ExecutionEngine.get_backtest_dynamic_slippage(abs(position_size)),
         )

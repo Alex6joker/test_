@@ -293,6 +293,7 @@ def audit(data: AuditData):
     retro_errors = []
     trail_warnings = []
 
+    precision_num = int(data.params.get("precision_num", 2))
     for trade, trails in trails_by_trade.items():
         trails.sort(key=lambda x: x.seq)
         entry = entries.get(trade)
@@ -327,11 +328,11 @@ def audit(data: AuditData):
                 trail_errors.append(f"trade_id={trade} step={t.step}: trigger={t.trigger} не пересечён {p.start}->{p.end} ({p.direction})")
             tp_distance = float(data.params.get("tp", abs(entry.price - p.tp)))
             expected_trigger = entry.price - tp_distance * t.trigger_pct if entry.direction == "SHORT" else entry.price + tp_distance * t.trigger_pct
-            expected_trigger = round(expected_trigger, 2)
+            expected_trigger = round(expected_trigger, precision_num)
             if abs(t.trigger - expected_trigger) > 0.011:
                 trail_errors.append(f"trade_id={trade} step={t.step}: trigger={t.trigger}, expected={expected_trigger}")
             expected_sl = entry.price - tp_distance * t.stop_pct if entry.direction == "SHORT" else entry.price + tp_distance * t.stop_pct
-            expected_sl = round(expected_sl, 2)
+            expected_sl = round(expected_sl, precision_num)
             if not same(t.new_sl, expected_sl):
                 trail_errors.append(f"trade_id={trade} step={t.step}: new_sl={t.new_sl}, expected={expected_sl}")
             if entry.direction == "LONG" and t.new_sl + EPS < t.old_sl:
@@ -366,19 +367,68 @@ def audit(data: AuditData):
             multi_errors.append(f"trade_id={key[0]} bar={key[1]} phase={key[2]}: trigger order против UP path: {prices}")
 
     exit_errors = []
+    gap_errors = []
+    gap_checked = 0
     for c in data.crossings:
         if c.phase_obj is None:
             exit_errors.append(f"trade_id={c.trade}: EXIT_CROSSING без INTRABAR_PHASE")
             continue
         p = c.phase_obj
+        entry = entries.get(c.trade)
         level = c.sl if c.reason == "STOP_LOSS" else c.tp if c.reason == "TAKE_PROFIT" else None
         if level is None:
             exit_errors.append(f"trade_id={c.trade}: неизвестный reason={c.reason}")
             continue
-        if not same(c.price, level):
-            exit_errors.append(f"trade_id={c.trade}: crossing_price={c.price} != level={level}")
-        if not crosses(p.start, p.end, level, p.direction):
-            exit_errors.append(f"trade_id={c.trade} bar={c.bar} phase={c.phase}: {c.reason} level={level} не пересечён {p.start}->{p.end}")
+
+        if same(c.price, level):
+            # Ordinary level crossing: the detected price must equal the
+            # normalized terminal level and the level must be crossed by the
+            # actual monotonic phase.
+            if not crosses(p.start, p.end, level, p.direction):
+                exit_errors.append(
+                    f"trade_id={c.trade} bar={c.bar} phase={c.phase}: "
+                    f"{c.reason} level={level} не пересечён {p.start}->{p.end}"
+                )
+            continue
+
+        # A crossing price different from SL/TP is valid only for the
+        # explicitly specified gap-through model.  In that model the first
+        # execution phase is a zero-length OPEN->OPEN phase and the detected
+        # price is exactly the current OPEN.
+        gap_checked += 1
+        if entry is None:
+            gap_errors.append(f"trade_id={c.trade}: gap EXIT_CROSSING без ENTRY_EXECUTED")
+            continue
+
+        valid_shape = (
+            c.phase == 0
+            and same(p.start, p.end)
+            and same(c.price, p.start)
+            and p.direction == "FLAT"
+        )
+        if not valid_shape:
+            gap_errors.append(
+                f"trade_id={c.trade} bar={c.bar} phase={c.phase}: "
+                f"gap event имеет неверную OPEN-фазу "
+                f"{p.start}->{p.end} direction={p.direction}"
+            )
+            continue
+
+        if entry.direction == "LONG":
+            expected_gap = (
+                (c.reason == "STOP_LOSS" and c.price < level)
+                or (c.reason == "TAKE_PROFIT" and c.price > level)
+            )
+        else:
+            expected_gap = (
+                (c.reason == "STOP_LOSS" and c.price > level)
+                or (c.reason == "TAKE_PROFIT" and c.price < level)
+            )
+        if not expected_gap:
+            gap_errors.append(
+                f"trade_id={c.trade}: {c.reason} gap OPEN={c.price} "
+                f"не находится за уровнем={level} для {entry.direction}"
+            )
 
     exec_errors = []
     signals = defaultdict(list)
@@ -398,7 +448,7 @@ def audit(data: AuditData):
         else:
             direction = entries[trade].direction
             expected_target = crossing.price + crossing.slippage if direction == "SHORT" else crossing.price - crossing.slippage
-            expected_target = round(expected_target, 2)
+            expected_target = round(expected_target, precision_num)
             if not same(s.target, expected_target): exec_errors.append(f"trade_id={trade}: target_exec={s.target}, expected={expected_target}")
             if not same(e.slippage, crossing.slippage): exec_errors.append(f"trade_id={trade}: exit_slippage mismatch")
         if not same(e.price, e.target): exec_errors.append(f"trade_id={trade}: execution_price={e.price} != target_exec_price={e.target}")
@@ -417,6 +467,7 @@ def audit(data: AuditData):
         result("TRAIL_CAUSALITY", checked, trail_errors, trail_warnings),
         result("MULTIPLE_TRAIL_STEPS", len(by_phase), multi_errors),
         result("EXIT_CROSSING_CAUSALITY", len(data.crossings), exit_errors),
+        result("GAP_OPEN_EXECUTION", gap_checked, gap_errors),
         result("NO_RETROACTIVE_SL", len(data.trails), retro_errors),
         result("EXIT_EXECUTION", len(data.exit_signals), exec_errors),
         result("TRADE_LIFECYCLE", len(data.entries), lifecycle_errors),

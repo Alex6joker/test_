@@ -83,6 +83,7 @@ class BacktestExecutionContractTests(unittest.TestCase):
     def test_doji_path_is_open_low_high_close(self):
         s=ExecutionHarness(); s.state.tp_level=105.0; bar=Bar(datetime(2026,1,1),100,103,99,100,100); result=s.engine.process(s.context.execution_snapshot(),bar,7); self.assertEqual([(p.start_price,p.end_price) for p in result.phases],[(100,99),(99,103),(103,100)])
 
+
     def test_processing_after_position_is_closed_stops(self):
         s=ExecutionHarness(direction=1,entry=100,sl=99,tp=101); self.assertTrue(s.segment(100,102,10,0)); self.assertFalse(s.segment(102,90,10,1)); self.assertEqual(s.ledger.closed_trades,1)
 
@@ -90,6 +91,90 @@ class BacktestExecutionContractTests(unittest.TestCase):
 class PureExecutionEngineTests(unittest.TestCase):
     def snapshot(self, **changes):
         values=dict(position_size=5,entry_price=100.0,sl_level=98.0,tp_level=103.0,current_trail_step=-1,trail_levels=(TrailLevel(0,100.5,100.1),),slippage=0.02); values.update(changes); return ExecutionSnapshot(**values)
+
+    def test_long_gap_through_sl_executes_at_open_with_slippage(self):
+        e=ExecutionEngine()
+        snap=self.snapshot(sl_level=99.0, tp_level=103.0)
+        bar=Bar(datetime(2026,1,1),97.006,98.0,96.0,97.5,100)
+        result=e.process(snap,bar,10)
+        self.assertIsNotNone(result.exit)
+        self.assertEqual(result.exit.event_type,"STOP_LOSS")
+        self.assertEqual(result.exit.detected_price,97.006)
+        self.assertEqual(result.exit.execution_price,96.986)
+        self.assertEqual(result.exit.phase_index,0)
+
+    def test_short_gap_through_sl_executes_at_open_with_slippage(self):
+        e=ExecutionEngine()
+        snap=self.snapshot(position_size=-5,sl_level=101.0,tp_level=97.0)
+        bar=Bar(datetime(2026,1,1),101.006,102.0,100.0,101.5,100)
+        result=e.process(snap,bar,10)
+        self.assertIsNotNone(result.exit)
+        self.assertEqual(result.exit.event_type,"STOP_LOSS")
+        self.assertEqual(result.exit.detected_price,101.006)
+        self.assertEqual(result.exit.execution_price,101.026)
+        self.assertEqual(result.exit.phase_index,0)
+
+    def test_long_gap_through_tp_executes_at_open_with_slippage(self):
+        e=ExecutionEngine()
+        snap=self.snapshot(sl_level=98.0,tp_level=102.0)
+        bar=Bar(datetime(2026,1,1),102.006,103.0,101.0,102.5,100)
+        result=e.process(snap,bar,10)
+        self.assertIsNotNone(result.exit)
+        self.assertEqual(result.exit.event_type,"TAKE_PROFIT")
+        self.assertEqual(result.exit.detected_price,102.006)
+        self.assertEqual(result.exit.execution_price,101.986)
+
+    def test_short_gap_through_tp_executes_at_open_with_slippage(self):
+        e=ExecutionEngine()
+        snap=self.snapshot(position_size=-5,sl_level=102.0,tp_level=98.0)
+        bar=Bar(datetime(2026,1,1),97.006,99.0,96.0,97.5,100)
+        result=e.process(snap,bar,10)
+        self.assertIsNotNone(result.exit)
+        self.assertEqual(result.exit.event_type,"TAKE_PROFIT")
+        self.assertEqual(result.exit.detected_price,97.006)
+        self.assertEqual(result.exit.execution_price,97.026)
+
+    def test_native_gap_execution_is_price_rounded_at_accounting_boundary(self):
+        s=ExecutionHarness(direction=1,entry=100,sl=99,tp=110)
+        s.state.sl_level=99.0
+        s.state.tp_level=110.0
+        bar=Bar(datetime(2026,1,1),97.006,98.0,96.0,97.5,100)
+        result=s.engine.process_bar(s.context,bar,10)
+        self.assertIsNotNone(result)
+        self.assertEqual(s.ledger.records[0]['exit_price'],96.99)
+
+    def test_equal_sl_and_tp_terminal_tie_prefers_sl(self):
+        e=ExecutionEngine()
+        snap=self.snapshot(sl_level=101.0,tp_level=101.0)
+        phase=e._process_segment(snap,100.0,102.0,10,0)
+        self.assertIsNotNone(phase)
+        self.assertIsNotNone(phase.exit)
+        self.assertEqual(phase.exit.event_type,"STOP_LOSS")
+
+    def test_rejected_trail_advances_state_in_fast_path(self):
+        e=ExecutionEngine()
+        snap=self.snapshot(sl_level=99.0,tp_level=110.0,current_trail_step=-1,trail_levels=(TrailLevel(0,101.0,98.0),TrailLevel(1,102.0,99.5)))
+        bar=Bar(datetime(2026,1,1),100,102.5,99.5,102.5,100)
+        full=e.process(snap,bar,10)
+        fast=e.process_fast(snap,bar,10)
+        full_steps=[p.resulting_trail_step for p in full.phases]
+        self.assertEqual(fast[0],tuple(u for p in full.phases for u in p.trail_updates))
+        self.assertEqual(full_steps[-1],1)
+        # Step 0 is rejected, step 1 is accepted; FAST must carry the
+        # rejected step forward just like FULL.
+        self.assertEqual(fast[1],full.exit)
+        self.assertEqual(fast[0][0].step_idx,1)
+
+
+    def test_sl_at_open_on_adverse_bullish_phase_executes_at_open(self):
+        e=ExecutionEngine()
+        snap=self.snapshot(sl_level=99.0,tp_level=110.0)
+        bar=Bar(datetime(2026,1,1),99.0,100.0,98.0,99.5,100)
+        result=e.process(snap,bar,10)
+        self.assertIsNotNone(result.exit)
+        self.assertEqual(result.exit.event_type,"STOP_LOSS")
+        self.assertEqual(result.exit.detected_price,99.0)
+        self.assertEqual(result.exit.execution_price,98.98)
 
     def test_pure_engine_does_not_require_runtime_context(self):
         result=ExecutionEngine().process(self.snapshot(),Bar(datetime(2026,1,1),100,104,99,103,100),10); self.assertTrue(result.phases)
